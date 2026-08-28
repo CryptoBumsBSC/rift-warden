@@ -1,1 +1,1 @@
-Final verified Rift Warden source unpack run.
+Run verified Rift Warden deployability gate.
