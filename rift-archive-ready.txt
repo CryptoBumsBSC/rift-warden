@@ -1,1 +1,1 @@
-Rerun final Rift Warden build gate.
+Run corrected Rift Warden production build gate.
