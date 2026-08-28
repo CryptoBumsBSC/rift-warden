@@ -14,29 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Repair retained archive blocks and verify final source
+      - name: Verify and unpack final source
         shell: bash
         run: |
           set -euo pipefail
-
-          # Work only with the 19 canonical two-digit files. Temporary .fixed files
-          # are deliberately excluded from both the count and concatenation.
           test "$(find . -maxdepth 1 -type f -name 'rift-complete-new.b64.part-[0-9][0-9]' | wc -l)" -eq 19
 
-          # Block 00 was re-staged byte-for-byte from the verified local archive.
-          test -f rift-complete-new.b64.part-00.fixed
+          # These three verified copies were staged byte-for-byte from the source archive.
           cp rift-complete-new.b64.part-00.fixed rift-complete-new.b64.part-00
-
-          # Reuse the retained nolock archive pieces already in GitHub. These are
-          # checked below against the final expected SHA-256 values before decode.
-          cp rift-final-nolock.tar.xz.b64.part-01 rift-complete-new.b64.part-01
-          cp rift-final-nolock.tar.xz.b64.part-02 rift-complete-new.b64.part-02
-          cat rift-final-nolock.tar.xz.b64.part-04a rift-final-nolock.tar.xz.b64.part-04b > rift-complete-new.b64.part-04
-          cat rift-final-nolock.tar.xz.b64.part-05a rift-final-nolock.tar.xz.b64.part-05b > rift-complete-new.b64.part-05
-          cat rift-final-nolock.tar.xz.b64.part-06a rift-final-nolock.tar.xz.b64.part-06b > rift-complete-new.b64.part-06
-          cat rift-final-nolock.tar.xz.b64.part-07a rift-final-nolock.tar.xz.b64.part-07b > rift-complete-new.b64.part-07
-          cat rift-final-nolock.tar.xz.b64.part-08a rift-final-nolock.tar.xz.b64.part-08b > rift-complete-new.b64.part-08
-          cat rift-final-nolock.tar.xz.b64.part-09a rift-final-nolock.tar.xz.b64.part-09b > rift-complete-new.b64.part-09
+          cp rift-complete-new.b64.part-02.fixed rift-complete-new.b64.part-02
+          cp rift-complete-new.b64.part-03.fixed rift-complete-new.b64.part-03
 
           cat > /tmp/expected-sha256 <<'EOF'
           2a64eb7d791b64102958cb81a609b960683bf0a55aa0f03694385da5f4b4215c  rift-complete-new.b64.part-00
@@ -84,17 +71,13 @@ jobs:
           replacements = [
               ('timezone: r.timezone || "America/Los_Angeles",', 'timezone: r.timezone || COMMUNITY_TIMEZONE,'),
               ('timezone: "America/Los_Angeles",\n    status: "trial",', 'timezone: COMMUNITY_TIMEZONE,\n    status: "trial",'),
-              ('`Common options:\\n` +\n        `• America/Los_Angeles (Pacific)\\n` +\n        `• America/New_York (Eastern)\\n` +\n        `• Europe/London (GMT/BST)\\n` +\n        `• Australia/Sydney (AEST)\\n` +', '`Common options:\\n` +\n        `• Australia/Hobart (Tasmania)\\n` +\n        `• Australia/Sydney (AEST/AEDT)\\n` +\n        `• America/Los_Angeles (Pacific)\\n` +\n        `• America/New_York (Eastern)\\n` +\n        `• Europe/London (GMT/BST)\\n` +'),
-              ('`Common options:\\n` +\n            `• America/Los_Angeles (Pacific)\\n` +\n            `• America/New_York (Eastern)\\n` +\n            `• Europe/London (GMT/BST)\\n` +\n            `• Australia/Sydney (AEST)\\n` +\n            `• UTC\\n\\n` +\n            `Type one of the above, or "skip" to use Pacific Time.`', '`Common options:\\n` +\n            `• Australia/Hobart (Tasmania)\\n` +\n            `• Australia/Sydney (AEST/AEDT)\\n` +\n            `• America/Los_Angeles (Pacific)\\n` +\n            `• America/New_York (Eastern)\\n` +\n            `• Europe/London (GMT/BST)\\n` +\n            `• UTC\\n\\n` +\n            `Type one of the above, or "skip" to use ${COMMUNITY_TIMEZONE}.`'),
               ('if (timezone.toLowerCase() === "skip") timezone = "America/Los_Angeles";', 'if (timezone.toLowerCase() === "skip") timezone = COMMUNITY_TIMEZONE;'),
-              ('await ctx.reply("That doesn\'t look like a valid timezone. Try again or type \'skip\' to use Pacific Time.");', 'await ctx.reply(`That doesn\'t look like a valid timezone. Try again or type \'skip\' to use ${COMMUNITY_TIMEZONE}.`);'),
               ('const timezone = _wizardState.timezone || "America/Los_Angeles";', 'const timezone = _wizardState.timezone || COMMUNITY_TIMEZONE;'),
               ('const scheduleInfo = `Here\'s when winners are announced (all times Pacific):', 'const scheduleCommunity = await getCommunity(String(chatId));\n      const scheduleTimezone = scheduleCommunity?.timezone || COMMUNITY_TIMEZONE;\n      const scheduleInfo = `Here\'s when winners are announced (all times ${scheduleTimezone}):'),
           ]
           for old, new in replacements:
-              count = s.count(old)
-              if count != 1:
-                  raise SystemExit(f'Expected exactly one bot.ts match, got {count}: {old[:80]}')
+              if s.count(old) != 1:
+                  raise SystemExit(f'Expected one bot.ts match for: {old}')
               s = s.replace(old, new, 1)
           p.write_text(s)
 
@@ -103,7 +86,7 @@ jobs:
           old = 'timezone: text("timezone").default("America/Los_Angeles"),'
           new = 'timezone: text("timezone").default("Australia/Hobart"),'
           if s.count(old) != 1:
-              raise SystemExit('Expected exactly one schema timezone match')
+              raise SystemExit('Expected one schema timezone match')
           p.write_text(s.replace(old, new, 1))
           PY
 
