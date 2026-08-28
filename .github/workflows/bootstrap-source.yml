@@ -77,6 +77,7 @@ jobs:
             'await ctx.reply("That doesn\'t look like a valid timezone. Try again or type \'skip\' to use Pacific Time.");': 'await ctx.reply(`That doesn\'t look like a valid timezone. Try again or type \'skip\' to use ${COMMUNITY_TIMEZONE}.`);',
             'const timezone = _wizardState.timezone || "America/Los_Angeles";': 'const timezone = _wizardState.timezone || COMMUNITY_TIMEZONE;',
             'const scheduleInfo = `Here\'s when winners are announced (all times Pacific):': 'const scheduleCommunity = await getCommunity(String(chatId));\n      const scheduleTimezone = scheduleCommunity?.timezone || COMMUNITY_TIMEZONE;\n      const scheduleInfo = `Here\'s when winners are announced (all times ${scheduleTimezone}):',
+            '[...new Set(topics)].join(", ")': 'Array.from(new Set(topics)).join(", ")',
           }
           for old, new in replacements.items():
               if old not in s:
@@ -90,7 +91,7 @@ jobs:
               raise SystemExit('Missing schema timezone default')
           p.write_text(s.replace(old, 'timezone: text("timezone").default("Australia/Hobart"),'))
           PY
-          ! grep -RIn --exclude-dir=node_modules -E 'timezone: r.timezone \|\| "America/Los_Angeles"|timezone: "America/Los_Angeles"|use Pacific Time|all times Pacific' server shared
+          ! grep -RIn --exclude-dir=node_modules -E 'timezone: r.timezone \|\| "America/Los_Angeles"|timezone: "America/Los_Angeles"|use Pacific Time|all times Pacific|\[\.\.\.new Set\(topics\)\]' server shared
 
       - uses: actions/setup-node@v4
         with:
