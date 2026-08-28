@@ -1,4 +1,4 @@
-name: Bootstrap Rift Warden source
+name: Finalize Rift Warden source
 
 on:
   push:
@@ -9,25 +9,24 @@ permissions:
   contents: write
 
 jobs:
-  unpack:
+  finalize:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify and unpack final source
+      - name: Rebuild verified archive and unpack
         shell: bash
         run: |
           set -euo pipefail
           test "$(find . -maxdepth 1 -type f -name 'rift-complete-new.b64.part-[0-9][0-9]' | wc -l)" -eq 19
 
-          # Verified staged copies / byte-safe repair halves.
           cp rift-complete-new.b64.part-00.fixed rift-complete-new.b64.part-00
           cp rift-complete-new.b64.part-02.fixed rift-complete-new.b64.part-02
           cp rift-complete-new.b64.part-03.fixed rift-complete-new.b64.part-03
           cat rift-repair-07-a rift-repair-07-b > rift-complete-new.b64.part-07
           cat rift-repair-08-a rift-repair-08-b > rift-complete-new.b64.part-08
           cat rift-repair-09-a rift-repair-09-b > rift-complete-new.b64.part-09
-          cat rift-repair-10-a rift-repair-10-b > rift-complete-new.b64.part-10
+          cat rift-repair-10-a1 rift-repair-10-a2 rift-repair-10-b > rift-complete-new.b64.part-10
           cat rift-repair-17-a rift-repair-17-b > rift-complete-new.b64.part-17
 
           cat > /tmp/expected-sha256 <<'EOF'
@@ -65,49 +64,55 @@ jobs:
           test -f /tmp/rift-unpack/rift_final/client/public/rift-radio.html
           cp -a /tmp/rift-unpack/rift_final/. ./
 
-      - name: Apply final Hobart launch corrections
+      - name: Apply final launch corrections
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+
           p = Path('server/bot.ts')
           s = p.read_text()
-          replacements = [
-              ('timezone: r.timezone || "America/Los_Angeles",', 'timezone: r.timezone || COMMUNITY_TIMEZONE,'),
-              ('timezone: "America/Los_Angeles",\n    status: "trial",', 'timezone: COMMUNITY_TIMEZONE,\n    status: "trial",'),
-              ('if (timezone.toLowerCase() === "skip") timezone = "America/Los_Angeles";', 'if (timezone.toLowerCase() === "skip") timezone = COMMUNITY_TIMEZONE;'),
-              ('const timezone = _wizardState.timezone || "America/Los_Angeles";', 'const timezone = _wizardState.timezone || COMMUNITY_TIMEZONE;'),
-              ('const scheduleInfo = `Here\'s when winners are announced (all times Pacific):', 'const scheduleCommunity = await getCommunity(String(chatId));\n      const scheduleTimezone = scheduleCommunity?.timezone || COMMUNITY_TIMEZONE;\n      const scheduleInfo = `Here\'s when winners are announced (all times ${scheduleTimezone}):'),
-          ]
-          for old, new in replacements:
-              if s.count(old) != 1:
-                  raise SystemExit(f'Expected one bot.ts match for: {old}')
-              s = s.replace(old, new, 1)
+          replacements = {
+            'timezone: r.timezone || "America/Los_Angeles",': 'timezone: r.timezone || COMMUNITY_TIMEZONE,',
+            'timezone: "America/Los_Angeles",\n    status: "trial",': 'timezone: COMMUNITY_TIMEZONE,\n    status: "trial",',
+            '`• America/Los_Angeles (Pacific)\\n` +\n        `• America/New_York (Eastern)\\n` +\n        `• Europe/London (GMT/BST)\\n` +\n        `• Australia/Sydney (AEST)\\n` +': '`• Australia/Hobart (Tasmania)\\n` +\n        `• Australia/Sydney (AEST/AEDT)\\n` +\n        `• America/Los_Angeles (Pacific)\\n` +\n        `• America/New_York (Eastern)\\n` +\n        `• Europe/London (GMT/BST)\\n` +',
+            '`• America/Los_Angeles (Pacific)\\n` +\n            `• America/New_York (Eastern)\\n` +\n            `• Europe/London (GMT/BST)\\n` +\n            `• Australia/Sydney (AEST)\\n` +\n            `• UTC\\n\\n` +\n            `Type one of the above, or "skip" to use Pacific Time.`': '`• Australia/Hobart (Tasmania)\\n` +\n            `• Australia/Sydney (AEST/AEDT)\\n` +\n            `• America/Los_Angeles (Pacific)\\n` +\n            `• America/New_York (Eastern)\\n` +\n            `• Europe/London (GMT/BST)\\n` +\n            `• UTC\\n\\n` +\n            `Type one of the above, or "skip" to use ${COMMUNITY_TIMEZONE}.`',
+            'if (timezone.toLowerCase() === "skip") timezone = "America/Los_Angeles";': 'if (timezone.toLowerCase() === "skip") timezone = COMMUNITY_TIMEZONE;',
+            'await ctx.reply("That doesn\'t look like a valid timezone. Try again or type \'skip\' to use Pacific Time.");': 'await ctx.reply(`That doesn\'t look like a valid timezone. Try again or type \'skip\' to use ${COMMUNITY_TIMEZONE}.`);',
+            'const timezone = _wizardState.timezone || "America/Los_Angeles";': 'const timezone = _wizardState.timezone || COMMUNITY_TIMEZONE;',
+            'const scheduleInfo = `Here\'s when winners are announced (all times Pacific):': 'const scheduleCommunity = await getCommunity(String(chatId));\n      const scheduleTimezone = scheduleCommunity?.timezone || COMMUNITY_TIMEZONE;\n      const scheduleInfo = `Here\'s when winners are announced (all times ${scheduleTimezone}):',
+          }
+          for old, new in replacements.items():
+              if old not in s:
+                  raise SystemExit(f'Missing expected launch correction: {old[:90]}')
+              s = s.replace(old, new)
           p.write_text(s)
 
           p = Path('shared/schema.ts')
           s = p.read_text()
           old = 'timezone: text("timezone").default("America/Los_Angeles"),'
-          new = 'timezone: text("timezone").default("Australia/Hobart"),'
-          if s.count(old) != 1:
-              raise SystemExit('Expected one schema timezone match')
-          p.write_text(s.replace(old, new, 1))
+          if old not in s:
+              raise SystemExit('Missing schema timezone default')
+          p.write_text(s.replace(old, 'timezone: text("timezone").default("Australia/Hobart"),'))
           PY
+
+          ! grep -RIn --exclude-dir=node_modules -E 'timezone: r.timezone \|\| "America/Los_Angeles"|timezone: "America/Los_Angeles"|use Pacific Time|all times Pacific' server shared
 
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
 
-      - name: Generate reproducible lockfile
+      - name: Validate install, types and production build
         shell: bash
         run: |
           set -euo pipefail
-          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          test -s package-lock.json
+          npm ci --no-audit --no-fund
+          npm run check
+          npm run build
 
-      - name: Clean staging and commit real source tree
+      - name: Commit clean deployable source
         shell: bash
         run: |
           set -euo pipefail
@@ -122,5 +127,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --quiet && { echo 'No changes to commit'; exit 1; }
-          git commit -m "Add final Rift Warden source"
+          git commit -m "Add verified deployable Rift Warden source"
           git push
