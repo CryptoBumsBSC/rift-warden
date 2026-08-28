@@ -1,1 +1,1 @@
-Rift Warden final source archive: checksum diagnostic and strict bootstrap run.
+Rift Warden retained-block repair verification run.
