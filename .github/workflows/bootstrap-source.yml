@@ -19,7 +19,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(find . -maxdepth 1 -type f -name 'rift-complete-new.b64.part-[0-9][0-9]' | wc -l)" -eq 19
-
           cp rift-complete-new.b64.part-00.fixed rift-complete-new.b64.part-00
           cp rift-complete-new.b64.part-02.fixed rift-complete-new.b64.part-02
           cp rift-complete-new.b64.part-03.fixed rift-complete-new.b64.part-03
@@ -28,7 +27,6 @@ jobs:
           cat rift-repair-09-a rift-repair-09-b > rift-complete-new.b64.part-09
           cat rift-repair-10-a1 rift-repair-10-a2 rift-repair-10-b > rift-complete-new.b64.part-10
           cat rift-repair-17-a rift-repair-17-b > rift-complete-new.b64.part-17
-
           cat > /tmp/expected-sha256 <<'EOF'
           2a64eb7d791b64102958cb81a609b960683bf0a55aa0f03694385da5f4b4215c  rift-complete-new.b64.part-00
           a2c33ada88b8881dcc4c8c1687ed7bc51f8121d49914fb6332366f44f9719617  rift-complete-new.b64.part-01
@@ -51,12 +49,10 @@ jobs:
           ccaae95e1039320718ec7199888e7c712799dc231dae6576ed9d918a5cb2d010  rift-complete-new.b64.part-18
           EOF
           sha256sum -c /tmp/expected-sha256
-
           cat rift-complete-new.b64.part-[0-9][0-9] > /tmp/rift-final.b64
           base64 --decode /tmp/rift-final.b64 > /tmp/rift-final.tar.xz
           xz -t /tmp/rift-final.tar.xz
-          rm -rf /tmp/rift-unpack
-          mkdir -p /tmp/rift-unpack
+          rm -rf /tmp/rift-unpack && mkdir -p /tmp/rift-unpack
           tar -xJf /tmp/rift-final.tar.xz -C /tmp/rift-unpack
           test -f /tmp/rift-unpack/rift_final/package.json
           test -f /tmp/rift-unpack/rift_final/vercel.json
@@ -70,7 +66,6 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           p = Path('server/bot.ts')
           s = p.read_text()
           replacements = {
@@ -88,7 +83,6 @@ jobs:
                   raise SystemExit(f'Missing expected launch correction: {old[:90]}')
               s = s.replace(old, new)
           p.write_text(s)
-
           p = Path('shared/schema.ts')
           s = p.read_text()
           old = 'timezone: text("timezone").default("America/Los_Angeles"),'
@@ -96,18 +90,18 @@ jobs:
               raise SystemExit('Missing schema timezone default')
           p.write_text(s.replace(old, 'timezone: text("timezone").default("Australia/Hobart"),'))
           PY
-
           ! grep -RIn --exclude-dir=node_modules -E 'timezone: r.timezone \|\| "America/Los_Angeles"|timezone: "America/Los_Angeles"|use Pacific Time|all times Pacific' server shared
 
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
-      - name: Validate install, types and production build
+      - name: Generate lockfile and validate production build
         shell: bash
         run: |
           set -euo pipefail
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          test -s package-lock.json
           npm ci --no-audit --no-fund
           npm run check
           npm run build
