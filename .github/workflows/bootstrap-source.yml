@@ -1,0 +1,30 @@
+name: Bootstrap Rift Warden source
+
+on:
+  push:
+    paths:
+      - 'rift-archive-ready.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack final source into repository root
+        shell: bash
+        run: |
+          cat rift-warden-final.zip.b64.part-* > /tmp/rift-warden-final.zip.b64
+          base64 --decode /tmp/rift-warden-final.zip.b64 > /tmp/rift-warden-final.zip
+          rm -rf /tmp/rift-unpack
+          mkdir -p /tmp/rift-unpack
+          unzip -q /tmp/rift-warden-final.zip -d /tmp/rift-unpack
+          cp -a /tmp/rift-unpack/rift_final/. ./
+          rm -f rift-archive-ready.txt rift-warden-final.zip.b64.part-*
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add finished Rift Warden bot source"
+          git push
