@@ -14,11 +14,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify and unpack final source
+      - name: Repair retained archive blocks and verify final source
         shell: bash
         run: |
           set -euo pipefail
-          test "$(find . -maxdepth 1 -name 'rift-complete-new.b64.part-*' | wc -l)" -eq 19
+
+          # Work only with the 19 canonical two-digit files. Temporary .fixed files
+          # are deliberately excluded from both the count and concatenation.
+          test "$(find . -maxdepth 1 -type f -name 'rift-complete-new.b64.part-[0-9][0-9]' | wc -l)" -eq 19
+
+          # Block 00 was re-staged byte-for-byte from the verified local archive.
+          test -f rift-complete-new.b64.part-00.fixed
+          cp rift-complete-new.b64.part-00.fixed rift-complete-new.b64.part-00
+
+          # Reuse the retained nolock archive pieces already in GitHub. These are
+          # checked below against the final expected SHA-256 values before decode.
+          cp rift-final-nolock.tar.xz.b64.part-01 rift-complete-new.b64.part-01
+          cp rift-final-nolock.tar.xz.b64.part-02 rift-complete-new.b64.part-02
+          cat rift-final-nolock.tar.xz.b64.part-04a rift-final-nolock.tar.xz.b64.part-04b > rift-complete-new.b64.part-04
+          cat rift-final-nolock.tar.xz.b64.part-05a rift-final-nolock.tar.xz.b64.part-05b > rift-complete-new.b64.part-05
+          cat rift-final-nolock.tar.xz.b64.part-06a rift-final-nolock.tar.xz.b64.part-06b > rift-complete-new.b64.part-06
+          cat rift-final-nolock.tar.xz.b64.part-07a rift-final-nolock.tar.xz.b64.part-07b > rift-complete-new.b64.part-07
+          cat rift-final-nolock.tar.xz.b64.part-08a rift-final-nolock.tar.xz.b64.part-08b > rift-complete-new.b64.part-08
+          cat rift-final-nolock.tar.xz.b64.part-09a rift-final-nolock.tar.xz.b64.part-09b > rift-complete-new.b64.part-09
+
           cat > /tmp/expected-sha256 <<'EOF'
           2a64eb7d791b64102958cb81a609b960683bf0a55aa0f03694385da5f4b4215c  rift-complete-new.b64.part-00
           a2c33ada88b8881dcc4c8c1687ed7bc51f8121d49914fb6332366f44f9719617  rift-complete-new.b64.part-01
@@ -41,7 +60,8 @@ jobs:
           ccaae95e1039320718ec7199888e7c712799dc231dae6576ed9d918a5cb2d010  rift-complete-new.b64.part-18
           EOF
           sha256sum -c /tmp/expected-sha256
-          cat rift-complete-new.b64.part-* > /tmp/rift-final.b64
+
+          cat rift-complete-new.b64.part-[0-9][0-9] > /tmp/rift-final.b64
           base64 --decode /tmp/rift-final.b64 > /tmp/rift-final.tar.xz
           xz -t /tmp/rift-final.tar.xz
           rm -rf /tmp/rift-unpack
@@ -77,6 +97,7 @@ jobs:
                   raise SystemExit(f'Expected exactly one bot.ts match, got {count}: {old[:80]}')
               s = s.replace(old, new, 1)
           p.write_text(s)
+
           p = Path('shared/schema.ts')
           s = p.read_text()
           old = 'timezone: text("timezone").default("America/Los_Angeles"),'
