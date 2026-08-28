@@ -16,13 +16,14 @@ jobs:
       - name: Unpack final source into repository root
         shell: bash
         run: |
-          cat rift-final.tar.xz.b64.part-* > /tmp/rift-final.tar.xz.b64
+          cat rift-final-nolock.tar.xz.b64.part-* > /tmp/rift-final.tar.xz.b64
           base64 --decode /tmp/rift-final.tar.xz.b64 > /tmp/rift-final.tar.xz
           rm -rf /tmp/rift-unpack
           mkdir -p /tmp/rift-unpack
           tar -xJf /tmp/rift-final.tar.xz -C /tmp/rift-unpack
           cp -a /tmp/rift-unpack/rift_final/. ./
-          rm -f rift-archive-ready.txt rift-final.tar.xz.b64.part-* rift-warden-final.zip.b64.part-*
+          npm install --package-lock-only --ignore-scripts || true
+          rm -f rift-archive-ready.txt rift-final-nolock.tar.xz.b64.part-* rift-final.tar.xz.b64.part-* rift-warden-final.zip.b64.part-*
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
