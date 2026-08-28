@@ -1,0 +1,1 @@
+Rift Warden final source archive complete: 19/19 blocks. Bootstrap, verify, correct and clean.
