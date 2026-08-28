@@ -19,6 +19,28 @@ jobs:
         run: |
           set -euo pipefail
           test "$(find . -maxdepth 1 -name 'rift-complete-new.b64.part-*' | wc -l)" -eq 19
+          cat > /tmp/expected-sha256 <<'EOF'
+          2a64eb7d791b64102958cb81a609b960683bf0a55aa0f03694385da5f4b4215c  rift-complete-new.b64.part-00
+          a2c33ada88b8881dcc4c8c1687ed7bc51f8121d49914fb6332366f44f9719617  rift-complete-new.b64.part-01
+          619a4fed433129813576a5a23631195c2f91470acb7c555fba0a821a6698d0d4  rift-complete-new.b64.part-02
+          c78ccf2ccb8ea6db3b1f00fdfb3d3e163c6c8fee86ab32bc51f7753303e1db01  rift-complete-new.b64.part-03
+          f8b68715638f4a20beb6a509da58d2a26d683a54ecec260b1615f46a37ffaba9  rift-complete-new.b64.part-04
+          16da71a143e5804a11c9a7788cbe15e845b91283dde2643276267b5447519f21  rift-complete-new.b64.part-05
+          d90a4d537e7eeb957f23c79dc537835000f2ab01640be812b3031dcdda77453b  rift-complete-new.b64.part-06
+          9f920f35298501949a1ff3300b7410a83a47d3591d18fe8e95fbda10d5d0f306  rift-complete-new.b64.part-07
+          ce6b7685405bc039c23da1aa100e9d07dbb3d4b57cf5140278a2cb5e12db4c39  rift-complete-new.b64.part-08
+          c09f1bcdf1325bb423a96a14f9e849f2a4aeed80a2b8ce90b1f94ecc2223b746  rift-complete-new.b64.part-09
+          9f0c21c1e84a047effd8ad4f400664e4b487e5df15109311e0582d077600da7b  rift-complete-new.b64.part-10
+          695e5cb1ce6266d30ef8db6b5511ac0bdc44b43ddbede900465f78c46760764a  rift-complete-new.b64.part-11
+          dcd143bfe01523b04bf5017c9d84640b334d5a70418b239bce70625ad6109510  rift-complete-new.b64.part-12
+          eb65157af67c1f8bcdd413ac5493d8c5d24e50602bd53c76c92fd6fe36990f38  rift-complete-new.b64.part-13
+          826b286e0db7dfc326237e6e0e043cb48124ea7a78cda44276eeca1af2921981  rift-complete-new.b64.part-14
+          b924619df92584cd17e7954207b57757052815fbcc63314bfe23b6bd094cc9d9  rift-complete-new.b64.part-15
+          25b3c4f198af1063f68f5e93e0da3628370cee27dcbed19e8e0658d7f12ebfda  rift-complete-new.b64.part-16
+          a766ba2d64e03a8923a72cb9fcf257070071b6b298f7660370f58e9f4d5ba17a  rift-complete-new.b64.part-17
+          ccaae95e1039320718ec7199888e7c712799dc231dae6576ed9d918a5cb2d010  rift-complete-new.b64.part-18
+          EOF
+          sha256sum -c /tmp/expected-sha256
           cat rift-complete-new.b64.part-* > /tmp/rift-final.b64
           base64 --decode /tmp/rift-final.b64 > /tmp/rift-final.tar.xz
           xz -t /tmp/rift-final.tar.xz
@@ -37,7 +59,6 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           p = Path('server/bot.ts')
           s = p.read_text()
           replacements = [
@@ -56,7 +77,6 @@ jobs:
                   raise SystemExit(f'Expected exactly one bot.ts match, got {count}: {old[:80]}')
               s = s.replace(old, new, 1)
           p.write_text(s)
-
           p = Path('shared/schema.ts')
           s = p.read_text()
           old = 'timezone: text("timezone").default("America/Los_Angeles"),'
