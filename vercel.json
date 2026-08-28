@@ -1,0 +1,32 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build:client",
+  "outputDirectory": "dist/public",
+  "framework": null,
+  "functions": {
+    "api/telegram.ts": { "maxDuration": 60, "memory": 1024 },
+    "api/cron.ts": { "maxDuration": 300, "memory": 1024 },
+    "api/admin.ts": { "maxDuration": 30, "memory": 1024 }
+  },
+  "crons": [
+    { "path": "/api/cron", "schedule": "*/5 * * * *" }
+  ],
+  "rewrites": [
+    { "source": "/api/telegram", "destination": "/api/telegram" },
+    { "source": "/api/cron", "destination": "/api/cron" },
+    { "source": "/api/set-webhook", "destination": "/api/set-webhook" },
+    { "source": "/api/(.*)", "destination": "/api/admin" },
+    { "source": "/health", "destination": "/api/admin" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ]
+}

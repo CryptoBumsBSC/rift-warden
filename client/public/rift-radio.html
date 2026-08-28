@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rift Radio</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --void:#080a0d; --panel:#0e1218; --edge:#1c232d;
+    --rift:#4fd8e8; --gold:#c9a227;
+    --text:#e8eaed; --dim:#7b8794; --dead:#4a5560;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--void);color:var(--text);
+    font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{min-height:100vh;padding:0 0 200px}
+
+  /* Signature: a frequency dial that physically tunes when you pick a station.
+     One flourish. Everything below it stays quiet. */
+  .dial{position:sticky;top:0;z-index:20;background:var(--void);
+    border-bottom:1px solid var(--edge);padding:20px 0 0}
+  .dial-head{display:flex;align-items:baseline;gap:11px;padding:0 20px 15px;flex-wrap:wrap}
+  .mark{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:.14em;line-height:1}
+  .mark span{color:var(--rift)}
+  .sub{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.18em;
+    color:var(--dead);text-transform:uppercase}
+
+  .scale{position:relative;height:46px;overflow:hidden;border-top:1px solid var(--edge)}
+  .ticks{position:absolute;inset:0;display:flex;align-items:flex-end;gap:9px;padding:0 20px 9px;
+    transition:transform .6s cubic-bezier(.2,.85,.2,1)}
+  .tick{width:1px;flex:0 0 1px;background:var(--edge)}
+  .tick.tall{height:21px;background:var(--dead)}
+  .tick.short{height:9px}
+  .needle{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--rift);
+    box-shadow:0 0 14px var(--rift);z-index:2}
+  .needle::after{content:"";position:absolute;top:0;left:-3px;width:7px;height:7px;
+    background:var(--rift);clip-path:polygon(50% 100%,0 0,100% 0)}
+
+  main{padding:24px 20px 0}
+  .lead{font-size:12.5px;color:var(--dim);line-height:1.6;margin-bottom:22px;max-width:54ch}
+
+  .station{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
+    background:var(--panel);border:1px solid var(--edge);border-left:2px solid var(--edge);
+    border-radius:2px;padding:14px 15px;margin-bottom:8px;cursor:pointer;color:inherit;
+    font:inherit;transition:border-color .18s,background .18s}
+  .station:hover:not(:disabled){border-color:var(--dead);background:#111721}
+  .station:focus-visible{outline:2px solid var(--rift);outline-offset:2px}
+  .station[aria-current="true"]{border-left-color:var(--rift);background:#101822}
+  .station:disabled{opacity:.45;cursor:wait}
+
+  .st-num{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--dead);
+    flex:0 0 auto;letter-spacing:.08em}
+  .st-body{flex:1;min-width:0}
+  .st-name{font-size:14.5px;font-weight:500;margin-bottom:3px}
+  .st-desc{font-size:11.5px;color:var(--dim);line-height:1.45}
+  .st-via{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.09em;
+    color:var(--dead);margin-top:5px;text-transform:uppercase}
+  .st-state{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--dead);flex:0 0 auto}
+  .st-state.live{color:var(--rift)}
+  .st-state.down{color:#8a5a5a}
+
+  .bars{display:flex;align-items:flex-end;gap:2px;height:15px;flex:0 0 auto;opacity:0;transition:opacity .2s}
+  .station[aria-current="true"] .bars{opacity:1}
+  .bars i{width:2px;background:var(--rift);height:3px;display:block}
+  .station[aria-current="true"] .bars i{animation:eq .9s ease-in-out infinite}
+  .station[aria-current="true"] .bars i:nth-child(2){animation-delay:.15s}
+  .station[aria-current="true"] .bars i:nth-child(3){animation-delay:.3s}
+  .station[aria-current="true"] .bars i:nth-child(4){animation-delay:.45s}
+  @keyframes eq{0%,100%{height:3px}50%{height:15px}}
+
+  .deck{position:fixed;left:0;right:0;bottom:0;background:rgba(8,10,13,.97);
+    backdrop-filter:blur(14px);border-top:1px solid var(--edge);
+    padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+    display:block;transform:translateY(130%);
+    transition:transform .3s cubic-bezier(.2,.85,.2,1);z-index:30}
+  .deck-top{display:flex;align-items:center;gap:10px}
+  .skip{background:none;border:1px solid var(--edge);color:var(--dim);border-radius:2px;
+    width:34px;height:34px;flex:0 0 auto;cursor:pointer;font-size:15px;line-height:1;
+    display:flex;align-items:center;justify-content:center;
+    transition:border-color .18s,color .18s}
+  .skip:hover{border-color:var(--rift);color:var(--rift)}
+  .skip:focus-visible{outline:2px solid var(--rift);outline-offset:2px}
+  .wave{display:block;width:100%;height:30px;margin-top:10px;opacity:.9}
+  .deck-vol{display:flex;align-items:center;gap:11px;margin-top:9px;
+    padding-top:10px;border-top:1px solid var(--edge)}
+  .mute{background:none;border:none;color:var(--dim);cursor:pointer;padding:2px;
+    flex:0 0 auto;display:flex;transition:color .18s}
+  .mute:hover{color:var(--rift)}
+  .mute:focus-visible{outline:2px solid var(--rift);outline-offset:2px}
+  .mute.muted{color:var(--dead)}
+  .mute.muted #volWave{opacity:.25}
+  .vol{-webkit-appearance:none;appearance:none;flex:1;height:2px;border-radius:0;
+    background:var(--edge);cursor:pointer;outline:none}
+  .vol::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
+    border-radius:50%;background:var(--rift);cursor:pointer;
+    box-shadow:0 0 9px rgba(79,216,232,.55)}
+  .vol::-moz-range-thumb{width:13px;height:13px;border:none;border-radius:50%;
+    background:var(--rift);cursor:pointer;box-shadow:0 0 9px rgba(79,216,232,.55)}
+  .vol:focus-visible{outline:2px solid var(--rift);outline-offset:5px}
+  .vol-num{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--dead);
+    flex:0 0 26px;text-align:right}
+  .deck.up{transform:translateY(0)}
+  .deck-body{flex:1;min-width:0}
+  .deck-label{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--dead);margin-bottom:3px}
+  .deck-name{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stop{background:none;border:1px solid var(--edge);color:var(--dim);border-radius:2px;
+    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;
+    text-transform:uppercase;padding:9px 13px;cursor:pointer;flex:0 0 auto;
+    transition:border-color .18s,color .18s}
+  .stop:hover{border-color:var(--rift);color:var(--rift)}
+  .stop:focus-visible{outline:2px solid var(--rift);outline-offset:2px}
+
+  footer{padding:14px 20px 34px;font-size:11px;color:var(--dead);line-height:1.65}
+
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="dial">
+  <div class="dial-head">
+    <div class="mark">RIFT <span>RADIO</span></div>
+    <div class="sub">Nine signals</div>
+  </div>
+  <div class="scale">
+    <div class="ticks" id="ticks"></div>
+    <div class="needle"></div>
+  </div>
+</div>
+
+<main>
+  <p class="lead">Pick one and leave it running. Nothing here needs your attention —
+  that's rather the point.</p>
+  <div id="list"></div>
+</main>
+
+<footer>
+  Audio comes straight to your device and is never stored or rebroadcast here.
+  Streams are carried courtesy of SomaFM, the ABC, and 24/7 Nature Radio — all
+  listener and publicly funded. Worth supporting if you listen often.
+</footer>
+
+<div class="deck" id="deck">
+  <div class="deck-top">
+    <button class="skip" id="prevBtn" aria-label="Previous channel">&#8592;</button>
+    <div class="deck-body">
+      <div class="deck-label" id="deckLabel">Now playing</div>
+      <div class="deck-name" id="deckName">&mdash;</div>
+    </div>
+    <button class="skip" id="nextBtn" aria-label="Next channel">&#8594;</button>
+    <button class="stop" id="stopBtn">Stop</button>
+  </div>
+  <canvas class="wave" id="wave" aria-hidden="true"></canvas>
+  <div class="deck-vol">
+    <button class="mute" id="muteBtn" aria-label="Mute">
+      <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+        <path id="volIcon" fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4z"/>
+        <path id="volWave" fill="none" stroke="currentColor" stroke-width="1.6"
+              stroke-linecap="round" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>
+      </svg>
+    </button>
+    <input type="range" id="vol" class="vol" min="0" max="100" value="70"
+           aria-label="Volume">
+    <span class="vol-num" id="volNum">70</span>
+  </div>
+</div>
+
+<audio id="player" crossorigin="anonymous"></audio>
+
+<script>
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor?.('#080a0d'); tg.setBackgroundColor?.('#080a0d'); }
+const buzz = (s='light') => tg?.HapticFeedback?.impactOccurred?.(s);
+
+// ── THE NINE ───────────────────────────────────────────────────────────────
+//
+// Locked in. To change one, edit its line — nothing else.
+//
+//   url      the stream, tried first
+//   lookup   fallback. If the url ever dies, the station is found by this name
+//            in the public radio directory instead. Belt and braces.
+//
+const STATIONS = [
+  { name:"Gateway Control", real:"SomaFM Mission Control",
+    desc:"Air-to-ground chatter over ambient. Real transmissions, long silences.",
+    url:"https://ice1.somafm.com/missioncontrol-128-mp3", lookup:"Mission Control" },
+
+  { name:"The Far Side", real:"SomaFM Deep Space One",
+    desc:"Deep ambient. Almost no beat at all.",
+    url:"https://ice1.somafm.com/deepspaceone-128-mp3", lookup:"Deep Space One" },
+
+  { name:"The Long Quiet", real:"SomaFM Drone Zone",
+    desc:"Pure texture. The slowest thing on the dial.",
+    url:"https://ice1.somafm.com/dronezone-128-mp3", lookup:"Drone Zone" },
+
+  { name:"Nightfall", real:"SomaFM Doomed",
+    desc:"Dark ambient and horror soundtrack. Best after midnight.",
+    url:"https://ice1.somafm.com/doomed-128-mp3", lookup:"SomaFM Doomed" },
+
+  { name:"Static Memory", real:"SomaFM Vaporwaves",
+    desc:"Slowed, half-remembered, faintly wrong.",
+    url:"https://ice1.somafm.com/vaporwaves-128-mp3", lookup:"Vaporwaves" },
+
+  { name:"The Archive", real:"Old Time Radio",
+    desc:"1940s and 50s serials. Sci-fi, mystery, the unexplained.",
+    url:"", lookup:"Old Time Radio" },
+
+  { name:"Bush Frequency", real:"ABC Triple J",
+    desc:"New Australian music.",
+    url:"", lookup:"Triple J" },
+
+  { name:"Field Notes", real:"ABC Radio National",
+    desc:"Talk, documentary and ideas. Carries the wildlife and environment programmes.",
+    url:"", lookup:"ABC Radio National" },
+
+  { name:"Dawn Chorus", real:"24/7 Birdsong Radio",
+    desc:"Birdsong, day and night. Recorded, not synthesised.",
+    url:"", lookup:"24/7 Birdsong Radio" },
+];
+
+// ── Dial ────────────────────────────────────────────────────────────────────
+const ticks = document.getElementById('ticks');
+for (let i = 0; i < 84; i++) {
+  const t = document.createElement('div');
+  t.className = 'tick ' + (i % 5 === 0 ? 'tall' : 'short');
+  ticks.appendChild(t);
+}
+const tuneTo = i => { ticks.style.transform = `translateX(${-(i * 46) - 30}px)`; };
+
+// ── Directory fallback ──────────────────────────────────────────────────────
+// Runs in the listener's browser. No key, no server of ours involved.
+const MIRRORS = [
+  'https://de1.api.radio-browser.info',
+  'https://nl1.api.radio-browser.info',
+  'https://at1.api.radio-browser.info',
+];
+async function lookupStream(query) {
+  for (const base of MIRRORS) {
+    try {
+      const res = await fetch(`${base}/json/stations/search?name=${encodeURIComponent(query)}`
+        + `&limit=8&hidebroken=true&order=votes&reverse=true`);
+      if (!res.ok) continue;
+      const list = await res.json();
+      const best = list.find(s => s.url_resolved && s.lastcheckok === 1)
+                || list.find(s => s.url_resolved);
+      if (best) return best.url_resolved;
+    } catch { /* next mirror */ }
+  }
+  return null;
+}
+
+// ── Build ───────────────────────────────────────────────────────────────────
+const player   = document.getElementById('player');
+const deck     = document.getElementById('deck');
+const deckName = document.getElementById('deckName');
+const deckLbl  = document.getElementById('deckLabel');
+const list     = document.getElementById('list');
+const buttons = [];
+
+let playing = -1;   // index of the live channel, -1 when stopped
+
+STATIONS.forEach((st, i) => {
+  const btn = document.createElement('button');
+  btn.className = 'station';
+  btn.setAttribute('aria-current', 'false');
+  btn.innerHTML =
+    `<div class="st-num">${String(i + 1).padStart(2, '0')}</div>
+     <div class="st-body">
+       <div class="st-name">${st.name}</div>
+       <div class="st-desc">${st.desc}</div>
+     </div>
+     <div class="bars"><i></i><i></i><i></i><i></i></div>
+     <div class="st-state">${st.url ? 'Ready' : 'Finding'}</div>`;
+
+  const state = btn.querySelector('.st-state');
+
+  if (!st.url) {
+    btn.disabled = true;
+    lookupStream(st.lookup).then(url => {
+      if (url) { st.url = url; btn.disabled = false; state.textContent = 'Ready'; }
+      else { state.textContent = 'Off air'; state.classList.add('down'); }
+    });
+  }
+
+  btn.addEventListener('click', () => {
+    if (playing === i) { stop(); return; }
+    tune(i);
+  });
+
+  buttons.push(btn);
+  list.appendChild(btn);
+});
+
+// ── Tuning ──────────────────────────────────────────────────────────────────
+async function tune(i) {
+  const st  = STATIONS[i];
+  const btn = buttons[i];
+  if (!st.url || btn.disabled) return;
+
+  buzz();
+  playing = i;
+
+  buttons.forEach(b => {
+    b.setAttribute('aria-current', 'false');
+    const s = b.querySelector('.st-state');
+    if (!s.classList.contains('down')) { s.textContent = 'Ready'; s.classList.remove('live'); }
+  });
+
+  const state = btn.querySelector('.st-state');
+  btn.setAttribute('aria-current', 'true');
+  state.textContent = 'Live';
+  state.classList.add('live');
+
+  tuneTo(i);
+  deckName.textContent = st.name;
+  deckLbl.textContent = 'Now playing';
+  deck.classList.add('up');
+  requestAnimationFrame(sizeWave);
+
+  // Keep the live channel on screen when skipping with the arrows.
+  btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+  player.src = st.url;
+  player.volume = muted ? 0 : level / 100;
+
+  try {
+    await player.play();
+  } catch {
+    state.textContent = 'Retuning';
+    const alt = await lookupStream(st.lookup);
+    if (alt && alt !== st.url) {
+      st.url = alt;
+      player.src = alt;
+      player.volume = muted ? 0 : level / 100;
+      try { await player.play(); state.textContent = 'Live'; return; } catch {}
+    }
+    state.textContent = 'Off air';
+    state.classList.add('down');
+    state.classList.remove('live');
+    deckLbl.textContent = "Couldn't reach that station";
+  }
+}
+
+// Skip past anything that's off air, wrapping around the dial.
+function step(dir) {
+  if (!STATIONS.length) return;
+  let i = playing === -1 ? (dir > 0 ? -1 : 0) : playing;
+  for (let n = 0; n < STATIONS.length; n++) {
+    i = (i + dir + STATIONS.length) % STATIONS.length;
+    if (STATIONS[i].url && !buttons[i].disabled) { tune(i); return; }
+  }
+}
+
+function stop() {
+  if (playing >= 0 && buttons[playing]) {
+    const btn = buttons[playing];
+    btn.setAttribute('aria-current', 'false');
+    const state = btn.querySelector('.st-state');
+    if (state && !state.classList.contains('down')) {
+      state.textContent = 'Ready';
+      state.classList.remove('live');
+    }
+  }
+  player.pause();
+  player.removeAttribute('src');
+  player.load();
+  playing = -1;
+  deck.classList.remove('up');
+  deckLbl.textContent = 'Now playing';
+  deckName.textContent = '—';
+  buzz('soft');
+}
+
+document.getElementById('prevBtn').addEventListener('click', () => step(-1));
+document.getElementById('nextBtn').addEventListener('click', () => step(1));
+
+// ── Volume ──────────────────────────────────────────────────────────────────
+// Remembered between visits — nobody wants to set this every time.
+const volEl   = document.getElementById('vol');
+const volNum  = document.getElementById('volNum');
+const muteBtn = document.getElementById('muteBtn');
+
+let level = Number(localStorage.getItem('riftradio.vol') ?? 70);
+let muted = localStorage.getItem('riftradio.muted') === '1';
+
+function applyVolume() {
+  player.volume = muted ? 0 : level / 100;
+  volEl.value = level;
+  volNum.textContent = muted ? 'off' : level;
+  muteBtn.classList.toggle('muted', muted);
+  volEl.style.background =
+    `linear-gradient(90deg, var(--rift) ${muted ? 0 : level}%, var(--edge) ${muted ? 0 : level}%)`;
+}
+
+volEl.addEventListener('input', () => {
+  level = Number(volEl.value);
+  if (level > 0) muted = false;
+  localStorage.setItem('riftradio.vol', String(level));
+  localStorage.setItem('riftradio.muted', muted ? '1' : '0');
+  applyVolume();
+});
+
+muteBtn.addEventListener('click', () => {
+  muted = !muted;
+  localStorage.setItem('riftradio.muted', muted ? '1' : '0');
+  applyVolume();
+  buzz('soft');
+});
+
+applyVolume();
+
+// ── Swipe the deck to change channel ────────────────────────────────────────
+let touchX = null;
+deck.addEventListener('touchstart', e => { touchX = e.changedTouches[0].clientX; }, { passive: true });
+deck.addEventListener('touchend', e => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  touchX = null;
+  if (Math.abs(dx) > 55) step(dx < 0 ? 1 : -1);
+}, { passive: true });
+
+// Arrow keys, for anyone on a desktop client.
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input')) return;
+  if (e.key === 'ArrowRight') step(1);
+  if (e.key === 'ArrowLeft')  step(-1);
+});
+
+
+// ── Signal trace ────────────────────────────────────────────────────────────
+//
+// Synthesised, not sampled. Reading the real audio needs Web Audio, and routing
+// a cross-origin radio stream through it silences playback outright when the
+// station doesn't send CORS headers — which many don't. A decoration is not
+// worth a chance of killing the radio. This looks the same and cannot break it.
+//
+// It does respond to state honestly: amplitude follows the volume slider, and
+// muting flatlines it.
+
+const wave = document.getElementById('wave');
+const wctx = wave.getContext('2d');
+let waveRAF = null, t = 0;
+
+function sizeWave() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = wave.getBoundingClientRect();
+  wave.width = Math.max(1, r.width * dpr);
+  wave.height = Math.max(1, r.height * dpr);
+  wctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', sizeWave);
+
+// Each channel gets its own character — slower and flatter for the ambient
+// ones, busier for music and talk. Index matches STATIONS.
+const CHARACTER = [
+  { speed:.010, layers:2, chop:.15 },  // Gateway Control — long silences
+  { speed:.008, layers:2, chop:.10 },  // The Far Side
+  { speed:.006, layers:2, chop:.06 },  // The Long Quiet — slowest
+  { speed:.013, layers:3, chop:.30 },  // Nightfall
+  { speed:.018, layers:3, chop:.35 },  // Static Memory
+  { speed:.020, layers:3, chop:.55 },  // The Archive — speech
+  { speed:.026, layers:4, chop:.60 },  // Bush Frequency — music
+  { speed:.021, layers:3, chop:.55 },  // Field Notes — speech
+  { speed:.014, layers:4, chop:.45 },  // Dawn Chorus — birds, spiky
+];
+
+function drawWave() {
+  const w = wave.clientWidth, h = wave.clientHeight, mid = h / 2;
+  wctx.clearRect(0, 0, w, h);
+
+  const ch = CHARACTER[playing] || CHARACTER[0];
+  const gain = muted ? 0 : level / 100;
+
+  // Flatline when muted or stopped — the trace tells the truth.
+  if (playing < 0 || gain === 0) {
+    wctx.strokeStyle = 'rgba(74,85,96,.75)';
+    wctx.lineWidth = 1;
+    wctx.beginPath();
+    wctx.moveTo(0, mid);
+    wctx.lineTo(w, mid);
+    wctx.stroke();
+    waveRAF = requestAnimationFrame(drawWave);
+    return;
+  }
+
+  t += ch.speed;
+
+  for (let l = 0; l < ch.layers; l++) {
+    const depth = 1 - l / (ch.layers + 1);
+    wctx.strokeStyle = `rgba(79,216,232,${0.16 + depth * 0.52})`;
+    wctx.lineWidth = l === 0 ? 1.5 : 1;
+    wctx.beginPath();
+
+    for (let x = 0; x <= w; x += 2) {
+      const p = x / w;
+      // Layered sines at incommensurate frequencies so it never visibly loops,
+      // plus a little noise so it doesn't read as a perfect maths curve.
+      const a = Math.sin(p * 11 + t * (1 + l * .55)) * .5;
+      const b = Math.sin(p * 27 - t * (1.7 + l * .4)) * .28;
+      const c = Math.sin(p * 5.3 + t * .6) * .34;
+      const noise = (Math.random() - .5) * ch.chop * .3;
+      // Taper at the edges so it reads as a trace, not a stripe.
+      const taper = Math.sin(p * Math.PI);
+      const y = mid + (a + b + c + noise) * mid * .78 * gain * depth * taper;
+      x === 0 ? wctx.moveTo(x, y) : wctx.lineTo(x, y);
+    }
+    wctx.stroke();
+  }
+
+  waveRAF = requestAnimationFrame(drawWave);
+}
+
+function startWave() {
+  if (waveRAF) return;
+  sizeWave();
+  drawWave();
+}
+function stopWave() {
+  if (waveRAF) { cancelAnimationFrame(waveRAF); waveRAF = null; }
+}
+
+// Respect the setting rather than animating regardless.
+const stillPreferred = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!stillPreferred) startWave();
+else { sizeWave(); wctx.strokeStyle = 'rgba(74,85,96,.75)'; wctx.beginPath();
+       wctx.moveTo(0, wave.clientHeight/2); wctx.lineTo(wave.clientWidth, wave.clientHeight/2); wctx.stroke(); }
+
+// Don't burn battery drawing a panel nobody is looking at.
+document.addEventListener('visibilitychange', () => {
+  if (stillPreferred) return;
+  document.hidden ? stopWave() : startWave();
+});
+
+document.getElementById('stopBtn').addEventListener('click', stop);
+
+player.addEventListener('error', () => {
+  if (playing < 0) return;
+  const s = buttons[playing].querySelector('.st-state');
+  s.textContent = 'Dropped';
+  s.classList.add('down');
+  s.classList.remove('live');
+  deckLbl.textContent = 'Signal lost';
+});
+</script>
+</body>
+</html>

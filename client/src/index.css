@@ -1,0 +1,117 @@
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&family=Nunito:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Boomerverse palette — near-black, cyan Rift, weathered gold */
+  /* Greens */
+  --color-leaf-light: 142 76% 85%;
+  --color-leaf-main: 142 70% 45%;
+  --color-leaf-dark: 145 80% 25%;
+  
+  /* Base Blue */
+  --color-base-blue: 215 100% 50%;
+  --color-base-light: 215 100% 95%;
+
+  /* Theme variables */
+  --background: 140 30% 98%;
+  --foreground: 145 80% 10%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 145 80% 10%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 145 80% 10%;
+
+  --primary: 142 70% 45%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 215 100% 50%;
+  --secondary-foreground: 0 0% 100%;
+
+  --muted: 142 20% 94%;
+  --muted-foreground: 145 30% 40%;
+
+  --accent: 215 100% 95%;
+  --accent-foreground: 215 100% 40%;
+
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+
+  --border: 142 20% 90%;
+  --input: 142 20% 90%;
+  --ring: 142 70% 45%;
+
+  --radius: 1rem;
+
+  /* Typography */
+  --font-display: 'Fredoka', cursive;
+  --font-body: 'Nunito', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-body);
+    background-image: radial-gradient(var(--color-leaf-light) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    @apply tracking-tight font-semibold;
+  }
+
+  /* Custom Scrollbar for playful feel */
+  ::-webkit-scrollbar {
+    width: 12px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.5);
+    border-radius: 99px;
+    border: 3px solid hsl(var(--muted));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary));
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-6 py-3 rounded-full font-bold text-white transition-all duration-300;
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(142 70% 35%));
+    box-shadow: 0 4px 0 hsl(142 70% 25%), 0 10px 10px -5px rgba(0,0,0,0.2);
+  }
+  .btn-primary:hover {
+    @apply -translate-y-1 shadow-lg;
+    box-shadow: 0 6px 0 hsl(142 70% 25%), 0 15px 15px -5px rgba(0,0,0,0.25);
+  }
+  .btn-primary:active {
+    @apply translate-y-1;
+    box-shadow: 0 0 0 hsl(142 70% 25%);
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-6 py-3 rounded-full font-bold text-white transition-all duration-300;
+    background: linear-gradient(135deg, hsl(var(--secondary)), hsl(215 100% 40%));
+    box-shadow: 0 4px 0 hsl(215 100% 30%), 0 10px 10px -5px rgba(0,0,0,0.2);
+  }
+  .btn-secondary:hover {
+    @apply -translate-y-1;
+    box-shadow: 0 6px 0 hsl(215 100% 30%), 0 15px 15px -5px rgba(0,0,0,0.25);
+  }
+  .btn-secondary:active {
+    @apply translate-y-1;
+    box-shadow: 0 0 0 hsl(215 100% 30%);
+  }
+
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-xl rounded-3xl;
+  }
+}

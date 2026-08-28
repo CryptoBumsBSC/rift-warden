@@ -1,0 +1,447 @@
+import { pgTable, text, serial, integer, timestamp, boolean } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+import { sql } from "drizzle-orm";
+
+// === TABLE DEFINITIONS ===
+export const characters = pgTable("characters", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  role: text("role").notNull(),
+  imageUrl: text("image_url"),
+});
+
+export const contentItems = pgTable("content_items", {
+  id: serial("id").primaryKey(),
+  type: text("type").notNull(),
+  title: text("title"),
+  content: text("content").notNull(),
+  category: text("category"),
+});
+
+// Chat tables for AI integration
+export const conversations = pgTable("conversations", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const messages = pgTable("messages", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// User memory for bot personality adaptation
+export const userMemory = pgTable("user_memory", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull().unique(),
+  username: text("username"),
+  firstName: text("first_name"),
+  messageCount: integer("message_count").default(0),
+  positiveInteractions: integer("positive_interactions").default(0),
+  negativeInteractions: integer("negative_interactions").default(0),
+  lastSeen: timestamp("last_seen").default(sql`CURRENT_TIMESTAMP`),
+  notes: text("notes"),
+  flaggedForTone: boolean("flagged_for_tone").default(false),
+  // Rudeness tracking for The Warden's adaptive responses
+  rudeStrikes: integer("rude_strikes").default(0),
+  lastRudeDate: text("last_rude_date"),
+  wasNiceAfterRude: boolean("was_nice_after_rude").default(false),
+  // Last 7 interactions tracking
+  lastInteractions: text("last_interactions"), // JSON array of last 7 requests
+  interests: text("interests"), // Topics mentioned more than once
+  scamStrikes: integer("scam_strikes").default(0), // Scam warning counter
+  language: text("language"), // Detected user language
+});
+
+// Community profiles for remembering member details
+export const communityProfiles = pgTable("community_profiles", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull().unique(),
+  chatId: text("chat_id"),
+  username: text("username"),
+  firstName: text("first_name"),
+  location: text("location"),
+  likes: text("likes"),
+  birthday: text("birthday"),
+  lastBirthdayYear: integer("last_birthday_year"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Moderation stats for community analytics
+export const moderationStats = pgTable("moderation_stats", {
+  id: serial("id").primaryKey(),
+  chatId: text("chat_id").notNull(),
+  date: text("date").notNull(), // YYYY-MM-DD format
+  newJoins: integer("new_joins").default(0),
+  messagesBlocked: integer("messages_blocked").default(0),
+  spamBlocked: integer("spam_blocked").default(0),
+  scamsBlocked: integer("scams_blocked").default(0),
+  linksBlocked: integer("links_blocked").default(0),
+  muteCount: integer("mute_count").default(0),
+  warnCount: integer("warn_count").default(0),
+  raidAttempts: integer("raid_attempts").default(0),
+  flaggedForReview: integer("flagged_for_review").default(0),
+});
+
+// User moderation status
+export const userModerationStatus = pgTable("user_moderation_status", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  chatId: text("chat_id").notNull(),
+  role: text("role").default("newbie"), // admin, mod, helper, verified, newbie
+  isMuted: boolean("is_muted").default(false),
+  muteUntil: timestamp("mute_until"),
+  muteReason: text("mute_reason"),
+  warnCount: integer("warn_count").default(0),
+  lastWarnDate: timestamp("last_warn_date"),
+  riskScore: integer("risk_score").default(0),
+  joinDate: timestamp("join_date").default(sql`CURRENT_TIMESTAMP`),
+  isQuarantined: boolean("is_quarantined").default(false),
+  quarantineReason: text("quarantine_reason"),
+});
+
+// Chat moderation settings
+export const chatModerationSettings = pgTable("chat_moderation_settings", {
+  id: serial("id").primaryKey(),
+  chatId: text("chat_id").notNull().unique(),
+  raidModeEnabled: boolean("raid_mode_enabled").default(false),
+  raidModeEnabledAt: timestamp("raid_mode_enabled_at"),
+  raidModeEnabledBy: text("raid_mode_enabled_by"),
+  linkBlockingEnabled: boolean("link_blocking_enabled").default(true),
+  spamThreshold: integer("spam_threshold").default(5), // messages per 10 sec
+  newUserLinkRestriction: integer("new_user_link_restriction").default(4), // hours (minimum 4)
+  modChannelId: text("mod_channel_id"), // where to send alerts
+});
+
+// Member scores for trivia and activity tracking
+export const memberScores = pgTable("member_scores", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  chatId: text("chat_id").notNull(),
+  username: text("username"),
+  firstName: text("first_name"),
+  triviaPoints: integer("trivia_points").default(0),
+  triviaCorrect: integer("trivia_correct").default(0),
+  triviaAttempts: integer("trivia_attempts").default(0),
+  messageCount: integer("message_count").default(0),
+  lastActive: timestamp("last_active").default(sql`CURRENT_TIMESTAMP`),
+  dailyPoints: integer("daily_points").default(0),
+  dailyResetDate: text("daily_reset_date"),
+  weeklyPoints: integer("weekly_points").default(0),
+  weeklyResetDate: text("weekly_reset_date"),
+  monthlyPoints: integer("monthly_points").default(0),
+  monthlyResetDate: text("monthly_reset_date"),
+  // Puzzle game scores (separate from trivia)
+  puzzlePoints: integer("puzzle_points").default(0),
+  puzzleCorrect: integer("puzzle_correct").default(0),
+  puzzleAttempts: integer("puzzle_attempts").default(0),
+  puzzleDailyPoints: integer("puzzle_daily_points").default(0),
+  puzzleDailyResetDate: text("puzzle_daily_reset_date"),
+  puzzleWeeklyPoints: integer("puzzle_weekly_points").default(0),
+  puzzleWeeklyResetDate: text("puzzle_weekly_reset_date"),
+  puzzleMonthlyPoints: integer("puzzle_monthly_points").default(0),
+  puzzleMonthlyResetDate: text("puzzle_monthly_reset_date"),
+});
+
+// Q&A Knowledge Cache - stores learned questions and answers to reduce AI costs
+export const qaCache = pgTable("qa_cache", {
+  id: serial("id").primaryKey(),
+  questionHash: text("question_hash").notNull(), // Normalized hash of the question
+  questionText: text("question_text").notNull(), // Original question
+  answerText: text("answer_text").notNull(), // AI-generated answer
+  askCount: integer("ask_count").default(1), // How many times this was asked
+  lastAsked: timestamp("last_asked").default(sql`CURRENT_TIMESTAMP`),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Ban Events - tracks all bans, kicks, and removals for owner review
+export const banEvents = pgTable("ban_events", {
+  id: serial("id").primaryKey(),
+  chatId: text("chat_id").notNull(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  username: text("username"),
+  firstName: text("first_name"),
+  actionType: text("action_type").notNull(), // ban, kick, auto_remove, mute
+  reason: text("reason"),
+  actorId: text("actor_id"), // who performed the action (bot or admin user id)
+  actorUsername: text("actor_username"),
+  executionSource: text("execution_source").default("bot"), // bot, admin, auto_moderation
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Trust System - 45-day gated trust scores with anti-gaming
+export const trustScores = pgTable("trust_scores", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  chatId: text("chat_id").notNull(),
+  username: text("username"),
+  firstName: text("first_name"),
+  // Trust score and status
+  trustScore: integer("trust_score").default(0), // 0-100 scale
+  trustStatus: text("trust_status").default("none"), // none, vouched, earned
+  isTrusted: boolean("is_trusted").default(false),
+  trustLevel: integer("trust_level").default(0), // 0-3 levels for progressive perks
+  // 45-day eligibility gate
+  joinDate: timestamp("join_date").default(sql`CURRENT_TIMESTAMP`),
+  eligibilityDate: timestamp("eligibility_date"), // 45 days after join
+  isEligible: boolean("is_eligible").default(false),
+  // Manual trust controls (owner only)
+  vouchedBy: text("vouched_by"), // telegram user id of voucher
+  vouchedAt: timestamp("vouched_at"),
+  isFrozen: boolean("is_frozen").default(false),
+  frozenBy: text("frozen_by"),
+  frozenAt: timestamp("frozen_at"),
+  frozenReason: text("frozen_reason"),
+  // Anti-gaming metrics
+  dailyMsgCount: integer("daily_msg_count").default(0),
+  dailyMsgDate: text("daily_msg_date"), // YYYY-MM-DD
+  weeklyMsgCount: integer("weekly_msg_count").default(0),
+  weeklyResetDate: text("weekly_reset_date"),
+  uniqueRepliedTo: integer("unique_replied_to").default(0), // diversity of interactions
+  meaningfulMsgCount: integer("meaningful_msg_count").default(0), // >10 chars
+  // Trust history
+  lastTrustUpdate: timestamp("last_trust_update"),
+  trustGainedToday: integer("trust_gained_today").default(0),
+  trustGainedThisWeek: integer("trust_gained_this_week").default(0),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// New user message tracking (for edit detection)
+export const newUserMessages = pgTable("new_user_messages", {
+  id: serial("id").primaryKey(),
+  messageId: text("message_id").notNull(),
+  chatId: text("chat_id").notNull(),
+  userId: text("user_id").notNull(),
+  username: text("username"),
+  originalContent: text("original_content"),
+  hasMedia: boolean("has_media").default(false),
+  hasLinks: boolean("has_links").default(false),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Violation logs for all security events
+export const violationLogs = pgTable("violation_logs", {
+  id: serial("id").primaryKey(),
+  chatId: text("chat_id").notNull(),
+  userId: text("user_id").notNull(),
+  username: text("username"),
+  violationType: text("violation_type").notNull(), // edit_scam, edit_link, edit_media, raid_join, burst_post, etc
+  originalContent: text("original_content"),
+  violatingContent: text("violating_content"),
+  actionTaken: text("action_taken"), // deleted, warned, muted, kicked, banned
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Chat feature settings - per-chat on/off toggles for every feature section
+export const chatFeatureSettings = pgTable("chat_feature_settings", {
+  id: serial("id").primaryKey(),
+  chatId: text("chat_id").notNull().unique(),
+  spam: boolean("spam").default(true).notNull(),
+  scam: boolean("scam").default(true).notNull(),
+  hate: boolean("hate").default(true).notNull(),
+  raid: boolean("raid").default(true).notNull(),
+  links: boolean("links").default(true).notNull(),
+  edits: boolean("edits").default(true).notNull(),
+  files: boolean("files").default(true).notNull(),
+  impersonation: boolean("impersonation").default(true).notNull(),
+  newuser: boolean("newuser").default(true).notNull(),
+  personality: boolean("personality").default(true).notNull(),
+  learning: boolean("learning").default(true).notNull(),
+  scheduled: boolean("scheduled").default(true).notNull(),
+  giveaways: boolean("giveaways").default(true).notNull(),
+  games: boolean("games").default(true).notNull(),
+  trust: boolean("trust").default(true).notNull(),
+  stories: boolean("stories").default(true).notNull(),
+  captcha: boolean("captcha").default(true).notNull(),
+  accountAge: boolean("account_age").default(true).notNull(),
+  massMention: boolean("mass_mention").default(true).notNull(),
+  bioScan: boolean("bio_scan").default(true).notNull(),
+  crossBan: boolean("cross_ban").default(true).notNull(),
+  aiChat: boolean("ai_chat").default(true).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Global ban list — bans propagated across all The Warden-managed communities
+export const globalBans = pgTable("global_bans", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().unique(),
+  username: text("username"),
+  displayName: text("display_name"),
+  bannedInChatId: text("banned_in_chat_id").notNull(),
+  reason: text("reason").default("Admin ban"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Multi-community SaaS — one row per Telegram group using the Warden
+export const communities = pgTable("communities", {
+  id: serial("id").primaryKey(),
+  chatId: text("chat_id").notNull().unique(),
+  displayName: text("display_name").notNull().default("Community"),
+  botNickname: text("bot_nickname").default("The Warden"),
+  welcomeMessage: text("welcome_message"),
+  timezone: text("timezone").default("Australia/Hobart"),
+  status: text("status").default("trial").notNull(), // trial | active | free | banned
+  trialExpiresAt: timestamp("trial_expires_at"),
+  isOnboarded: boolean("is_onboarded").default(false),
+  onboardingStep: integer("onboarding_step").default(0),
+  botAdminIds: text("bot_admin_ids").array().default(sql`ARRAY[]::text[]`),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// === BOT LEARNING SYSTEM ===
+
+// Bot interactions - stores all conversations for learning
+export const botInteractions = pgTable("bot_interactions", {
+  id: serial("id").primaryKey(),
+  chatId: text("chat_id").notNull(),
+  userId: text("user_id").notNull(),
+  username: text("username"),
+  userMessage: text("user_message").notNull(),
+  botResponse: text("bot_response").notNull(),
+  responseType: text("response_type"), // ai, cached, learned, knowledge, etc
+  feedbackScore: integer("feedback_score").default(0), // -1 bad, 0 neutral, 1 good
+  patternHash: text("pattern_hash"), // For matching similar questions
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// User feedback - thumbs up/down on responses
+export const userFeedback = pgTable("user_feedback", {
+  id: serial("id").primaryKey(),
+  interactionId: integer("interaction_id").notNull(),
+  userId: text("user_id").notNull(),
+  feedbackType: text("feedback_type").notNull(), // thumbs_up, thumbs_down
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Learned patterns - successful response patterns
+export const learnedPatterns = pgTable("learned_patterns", {
+  id: serial("id").primaryKey(),
+  patternHash: text("pattern_hash").notNull(),
+  patternKeywords: text("pattern_keywords").notNull(), // JSON array of keywords
+  bestResponse: text("best_response").notNull(),
+  successCount: integer("success_count").default(1),
+  useCount: integer("use_count").default(0),
+  lastUsed: timestamp("last_used"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Admin Portal Users — web-based admin/team accounts (separate from Telegram users)
+export const adminUsers = pgTable("admin_users", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  displayName: text("display_name"),
+  role: text("role").notNull().default("moderator"), // owner | admin | moderator
+  invitedBy: integer("invited_by"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  lastLoginAt: timestamp("last_login_at"),
+});
+
+// Admin Invites — pending invite tokens for new team members
+export const adminInvites = pgTable("admin_invites", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  role: text("role").notNull().default("moderator"),
+  token: text("token").notNull().unique(),
+  invitedBy: integer("invited_by").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  acceptedAt: timestamp("accepted_at"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// Bot Instances — registered bot deployments managed by this Hub
+// (this Repl auto-registers itself as isLocal=true; forks register via API)
+export const botInstances = pgTable("bot_instances", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  baseUrl: text("base_url").notNull(),
+  sharedSecret: text("shared_secret").notNull(),
+  isLocal: boolean("is_local").default(false).notNull(),
+  status: text("status").default("unknown").notNull(), // "ok" | "down" | "unknown"
+  lastSeenAt: timestamp("last_seen_at"),
+  lastError: text("last_error"),
+  addedByUserId: integer("added_by_user_id"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// Admin Audit Log — tracks every destructive action in the portal
+export const adminAuditLog = pgTable("admin_audit_log", {
+  id: serial("id").primaryKey(),
+  adminUserId: integer("admin_user_id"),
+  adminEmail: text("admin_email").notNull(),
+  adminRole: text("admin_role").notNull(),
+  action: text("action").notNull(),         // e.g. "feature.toggle", "community.status", "broadcast.send"
+  targetType: text("target_type"),          // "community", "team_member", "violation", "global_ban", "global"
+  targetId: text("target_id"),
+  details: text("details"),                 // JSON string with before/after or payload
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type AdminUser = typeof adminUsers.$inferSelect;
+export type AdminInvite = typeof adminInvites.$inferSelect;
+export type AdminAuditLog = typeof adminAuditLog.$inferSelect;
+export type BotInstance = typeof botInstances.$inferSelect;
+
+// === BASE SCHEMAS ===
+export const insertCharacterSchema = createInsertSchema(characters).omit({ id: true });
+export const insertContentItemSchema = createInsertSchema(contentItems).omit({ id: true });
+export const insertConversationSchema = createInsertSchema(conversations).omit({ id: true, createdAt: true });
+export const insertMessageSchema = createInsertSchema(messages).omit({ id: true, createdAt: true });
+export const insertUserMemorySchema = createInsertSchema(userMemory).omit({ id: true });
+export const insertCommunityProfileSchema = createInsertSchema(communityProfiles).omit({ id: true, createdAt: true });
+export const insertMemberScoreSchema = createInsertSchema(memberScores).omit({ id: true });
+export const insertModerationStatsSchema = createInsertSchema(moderationStats).omit({ id: true });
+export const insertUserModerationStatusSchema = createInsertSchema(userModerationStatus).omit({ id: true });
+export const insertChatModerationSettingsSchema = createInsertSchema(chatModerationSettings).omit({ id: true });
+export const insertQaCacheSchema = createInsertSchema(qaCache).omit({ id: true, createdAt: true, lastAsked: true });
+export const insertTrustScoreSchema = createInsertSchema(trustScores).omit({ id: true, createdAt: true });
+export const insertBanEventSchema = createInsertSchema(banEvents).omit({ id: true, createdAt: true });
+export const insertNewUserMessageSchema = createInsertSchema(newUserMessages).omit({ id: true, createdAt: true });
+export const insertViolationLogSchema = createInsertSchema(violationLogs).omit({ id: true, createdAt: true });
+export const insertChatFeatureSettingsSchema = createInsertSchema(chatFeatureSettings).omit({ id: true, updatedAt: true });
+export const insertCommunitySchema = createInsertSchema(communities).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertBotInteractionSchema = createInsertSchema(botInteractions).omit({ id: true, createdAt: true });
+export const insertUserFeedbackSchema = createInsertSchema(userFeedback).omit({ id: true, createdAt: true });
+export const insertLearnedPatternSchema = createInsertSchema(learnedPatterns).omit({ id: true, createdAt: true });
+
+// === EXPLICIT API CONTRACT TYPES ===
+export type Character = typeof characters.$inferSelect;
+export type ContentItem = typeof contentItems.$inferSelect;
+export type Conversation = typeof conversations.$inferSelect;
+export type Message = typeof messages.$inferSelect;
+export type UserMemory = typeof userMemory.$inferSelect;
+export type CommunityProfile = typeof communityProfiles.$inferSelect;
+export type MemberScore = typeof memberScores.$inferSelect;
+export type ModerationStats = typeof moderationStats.$inferSelect;
+export type UserModerationStatus = typeof userModerationStatus.$inferSelect;
+export type ChatModerationSettings = typeof chatModerationSettings.$inferSelect;
+export type QaCache = typeof qaCache.$inferSelect;
+export type TrustScore = typeof trustScores.$inferSelect;
+export type BanEvent = typeof banEvents.$inferSelect;
+export type NewUserMessage = typeof newUserMessages.$inferSelect;
+export type ViolationLog = typeof violationLogs.$inferSelect;
+export type ChatFeatureSettings = typeof chatFeatureSettings.$inferSelect;
+export type InsertChatFeatureSettings = z.infer<typeof insertChatFeatureSettingsSchema>;
+export type Community = typeof communities.$inferSelect;
+export type InsertCommunity = z.infer<typeof insertCommunitySchema>;
+export type BotInteraction = typeof botInteractions.$inferSelect;
+export type UserFeedback = typeof userFeedback.$inferSelect;
+export type LearnedPattern = typeof learnedPatterns.$inferSelect;
+
+export type InsertCharacter = z.infer<typeof insertCharacterSchema>;
+export type InsertContentItem = z.infer<typeof insertContentItemSchema>;
+export type InsertConversation = z.infer<typeof insertConversationSchema>;
+export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type InsertUserMemory = z.infer<typeof insertUserMemorySchema>;
+export type InsertCommunityProfile = z.infer<typeof insertCommunityProfileSchema>;
+
+export type CharacterResponse = Character;
+export type ContentItemResponse = ContentItem;
+
+export type ContentType = 'fact' | 'legal' | 'scam_term' | 'project_info';

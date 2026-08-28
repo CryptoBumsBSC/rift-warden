@@ -4,5 +4,5 @@ dist
 .vercel
 *.tar.gz
 .env
-.env.local
-.env*.local
+.env.*
+!.env.example
