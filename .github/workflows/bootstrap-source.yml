@@ -13,19 +13,84 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Unpack final source into repository root
+
+      - name: Verify and unpack final source
         shell: bash
         run: |
-          cat rift-final-nolock.tar.xz.b64.part-* > /tmp/rift-final.tar.xz.b64
-          base64 --decode /tmp/rift-final.tar.xz.b64 > /tmp/rift-final.tar.xz
+          set -euo pipefail
+          test "$(find . -maxdepth 1 -name 'rift-complete-new.b64.part-*' | wc -l)" -eq 19
+          cat rift-complete-new.b64.part-* > /tmp/rift-final.b64
+          base64 --decode /tmp/rift-final.b64 > /tmp/rift-final.tar.xz
+          xz -t /tmp/rift-final.tar.xz
           rm -rf /tmp/rift-unpack
           mkdir -p /tmp/rift-unpack
           tar -xJf /tmp/rift-final.tar.xz -C /tmp/rift-unpack
+          test -f /tmp/rift-unpack/rift_final/package.json
+          test -f /tmp/rift-unpack/rift_final/vercel.json
+          test -f /tmp/rift-unpack/rift_final/api/telegram.ts
+          test -f /tmp/rift-unpack/rift_final/client/public/rift-radio.html
           cp -a /tmp/rift-unpack/rift_final/. ./
-          npm install --package-lock-only --ignore-scripts || true
-          rm -f rift-archive-ready.txt rift-final-nolock.tar.xz.b64.part-* rift-final.tar.xz.b64.part-* rift-warden-final.zip.b64.part-*
+
+      - name: Apply final Hobart launch corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('server/bot.ts')
+          s = p.read_text()
+          replacements = [
+              ('timezone: r.timezone || "America/Los_Angeles",', 'timezone: r.timezone || COMMUNITY_TIMEZONE,'),
+              ('timezone: "America/Los_Angeles",\n    status: "trial",', 'timezone: COMMUNITY_TIMEZONE,\n    status: "trial",'),
+              ('`Common options:\\n` +\n        `• America/Los_Angeles (Pacific)\\n` +\n        `• America/New_York (Eastern)\\n` +\n        `• Europe/London (GMT/BST)\\n` +\n        `• Australia/Sydney (AEST)\\n` +', '`Common options:\\n` +\n        `• Australia/Hobart (Tasmania)\\n` +\n        `• Australia/Sydney (AEST/AEDT)\\n` +\n        `• America/Los_Angeles (Pacific)\\n` +\n        `• America/New_York (Eastern)\\n` +\n        `• Europe/London (GMT/BST)\\n` +'),
+              ('`Common options:\\n` +\n            `• America/Los_Angeles (Pacific)\\n` +\n            `• America/New_York (Eastern)\\n` +\n            `• Europe/London (GMT/BST)\\n` +\n            `• Australia/Sydney (AEST)\\n` +\n            `• UTC\\n\\n` +\n            `Type one of the above, or "skip" to use Pacific Time.`', '`Common options:\\n` +\n            `• Australia/Hobart (Tasmania)\\n` +\n            `• Australia/Sydney (AEST/AEDT)\\n` +\n            `• America/Los_Angeles (Pacific)\\n` +\n            `• America/New_York (Eastern)\\n` +\n            `• Europe/London (GMT/BST)\\n` +\n            `• UTC\\n\\n` +\n            `Type one of the above, or "skip" to use ${COMMUNITY_TIMEZONE}.`'),
+              ('if (timezone.toLowerCase() === "skip") timezone = "America/Los_Angeles";', 'if (timezone.toLowerCase() === "skip") timezone = COMMUNITY_TIMEZONE;'),
+              ('await ctx.reply("That doesn\'t look like a valid timezone. Try again or type \'skip\' to use Pacific Time.");', 'await ctx.reply(`That doesn\'t look like a valid timezone. Try again or type \'skip\' to use ${COMMUNITY_TIMEZONE}.`);'),
+              ('const timezone = _wizardState.timezone || "America/Los_Angeles";', 'const timezone = _wizardState.timezone || COMMUNITY_TIMEZONE;'),
+              ('const scheduleInfo = `Here\'s when winners are announced (all times Pacific):', 'const scheduleCommunity = await getCommunity(String(chatId));\n      const scheduleTimezone = scheduleCommunity?.timezone || COMMUNITY_TIMEZONE;\n      const scheduleInfo = `Here\'s when winners are announced (all times ${scheduleTimezone}):'),
+          ]
+          for old, new in replacements:
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one bot.ts match, got {count}: {old[:80]}')
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          p = Path('shared/schema.ts')
+          s = p.read_text()
+          old = 'timezone: text("timezone").default("America/Los_Angeles"),'
+          new = 'timezone: text("timezone").default("Australia/Hobart"),'
+          if s.count(old) != 1:
+              raise SystemExit('Expected exactly one schema timezone match')
+          p.write_text(s.replace(old, new, 1))
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Generate reproducible lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          test -s package-lock.json
+
+      - name: Clean staging and commit real source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f rift-archive-ready.txt
+          rm -f rift-complete-new.b64.part-*
+          rm -f rift-final-nolock.tar.xz.b64.part-*
+          rm -f rift-final.tar.xz.b64.part-*
+          rm -f rift-warden-final.zip.b64.part-*
+          rm -f .github/workflows/bootstrap-source.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Add finished Rift Warden bot source"
+          git diff --cached --quiet && { echo 'No changes to commit'; exit 1; }
+          git commit -m "Add final Rift Warden source"
           git push
