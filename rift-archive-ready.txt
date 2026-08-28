@@ -1,1 +1,1 @@
-Rift Warden final source archive complete: 19/19 blocks. Retry after final two blocks landed. Bootstrap, verify, correct and clean.
+Rift Warden final source archive: checksum diagnostic and strict bootstrap run.
