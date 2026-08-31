@@ -3,14 +3,10 @@
 // Replaces the Boomerverse storyBible.ts.
 //
 // GOLDEN RULE — NO LORE DRIFT.
-// Anything not written in this file, the Master Rulebook, the BVGEN Registry or
-// the Living Whitepaper is NOT canon. The Warden does not guess, extrapolate,
-// improvise or "fill in" canon. If it is not confirmed here, the Warden says so
-// and stops. See UNCONFIRMED_REPLIES below.
-//
-// Sections marked  // TODO(CANON)  are deliberately empty. They are waiting on
-// values from the Master Rulebook. Leaving them empty is SAFE — the Warden will
-// simply decline those questions. Filling them with guesses is NOT safe.
+// Anything not written in this file, the Master Rulebook, the BVGEN Registry,
+// the Lore Bible or the Living Whitepaper is NOT canon. The Warden does not
+// guess, extrapolate, improvise or "fill in" canon. If it is not confirmed here,
+// the Warden says so and stops. See UNCONFIRMED_REPLIES below.
 
 // ---------------------------------------------------------------------------
 // PROJECT FACTS — confirmed, safe to state publicly
@@ -26,7 +22,6 @@ First collection — Boomerverse: Genesis
 - Supply: 333 unique pieces
 - Chain: Base
 - Standard: ERC-721
-- Mint price: 0.021 ETH
 
 Rarity allocation (locked):
 - Common 166
@@ -40,14 +35,16 @@ Rarity allocation (locked):
 What this is:
 - A long-term character-driven collectible universe
 - Original Australian art and written canon
-- A community, and a conservation intent — a portion of profits is directed to
-  Australian endangered-animal and biodiversity causes
+- A community, and a conservation intent — a portion of profits is intended to
+  support Australian endangered-animal and biodiversity causes, with the exact
+  structure published when formally approved
 
 What this is not:
 - An investment
 - A financial product
 - A promise of profit
-- A token launch. There is no ERC-20. There will not be one.`;
+- A separate Boomerverse ERC-20 token launch in the current project design.
+  Any future change would require an explicit versioned project-rule update.`;
 
 const BOT_USERNAME = (process.env.BOT_USERNAME || "RiftWardenBot").replace(/^@/, "");
 
@@ -64,18 +61,16 @@ export const LOCKED_PIECES = [
     id: "BVGEN #001",
     name: "The Original Boomer",
     detail:
-      "Human, Founder. Carries the Rift Stone. Green glasses. Tasmania. Status: HARD LOCKED.",
+      "Human, Founder, Legendary. Carries the Rift Stone. Green rectangular glasses, grey/white beard, coffee mug. Region: Tasmania / The Gateway. Status: HARD LOCKED.",
   },
   {
     id: "BVGEN #002",
     name: "The Last Thylacine",
     detail:
-      "Ancient, Mythic. Carries the Stripe Key. Status: HARD LOCKED.",
+      "Thylacine, Ancient, Mythic. Carries the Stripe Key. Serious and mysterious; tied to deeper Rift history. Status: HARD LOCKED.",
   },
 ];
 
-// Structural counts are confirmed. The NAMES within them are not yet in this
-// file — that is intentional. See TODO(CANON) below.
 export const STRUCTURE = {
   speciesFamilies: 10,
   classes: 12,
@@ -83,61 +78,160 @@ export const STRUCTURE = {
   regions: 19,
 };
 
-// TODO(CANON): paste the 10 species family names from the Master Rulebook.
-export const SPECIES_FAMILIES: string[] = [];
+// LOCKED — Master Rulebook v1.1.
+export const SPECIES_FAMILIES: string[] = [
+  "Kangaroos",
+  "Wombats",
+  "Cockatoos",
+  "Tasmanian Devils",
+  "Kookaburras",
+  "Echidnas",
+  "Humans",
+  "Platypuses",
+  "Blue Heelers",
+  "Thylacines",
+];
 
-// TODO(CANON): paste the 12 class names from the Master Rulebook.
-export const CLASSES: string[] = [];
+// LOCKED — Master Rulebook v1.1.
+export const CLASSES: string[] = [
+  "Founders",
+  "Ancients",
+  "Explorers",
+  "Prospectors",
+  "Makers",
+  "Traders",
+  "Trackers",
+  "Broadcasters",
+  "Guardians",
+  "Hackers",
+  "Philosophers",
+  "Wildcards",
+];
 
-// TODO(CANON): paste the 7 Rift Energy states from the Master Rulebook.
-export const RIFT_ENERGY_STATES: string[] = [];
+// LOCKED — Master Rulebook v1.1 / Lore Bible v1.0.
+export const RIFT_ENERGY_STATES: string[] = [
+  "None",
+  "Trace",
+  "Touched",
+  "Active",
+  "Unstable",
+  "Ancient",
+  "Primordial",
+];
 
-// TODO(CANON): paste the 19 named regions from the Living Whitepaper.
-export const REGIONS: string[] = [];
+// LOCKED NAMES — Lore Bible v1.0. Detail beyond the approved continuity notes
+// remains flexible/open and must not be invented by the Warden.
+export const REGIONS: string[] = [
+  "The Gateway",
+  "Western Goldfields",
+  "Tarkine Deep",
+  "Zeehan Yard",
+  "Central Highlands",
+  "Cradle Pass",
+  "Southwest Wilds",
+  "Hydro Tunnels",
+  "West Coast Track",
+  "Derwent Camp",
+  "Red Dirt Run",
+  "Ironbark Country",
+  "Coastal Track",
+  "Gumtree Line",
+  "Signal Ridge",
+  "Radio Hill",
+  "Northern Workshop",
+  "Outback Relay",
+  "The Riftlands",
+];
 
 // ---------------------------------------------------------------------------
-// ROYALTY & REWARD ELIGIBILITY — confirmed, and asked about constantly
+// REWARD / FAIR-PLAY INFORMATION
 // ---------------------------------------------------------------------------
 
-export const ROYALTY_RULES = `Creator royalty is fixed at 5%.
+export const ROYALTY_RULES = `The active Genesis reward and fair-play framework is still being finalised.
 
-Reward eligibility travels with the token, not the wallet.
+Safe, confirmed guidance:
+- Genesis holders are free to sell, trade, swap, gift or transfer their NFTs.
+- Ownership and provenance are not erased by a transfer.
+- Reward eligibility is separate from ownership and is never guaranteed.
+- For Reward Assets that change owners, a genuine qualifying open-market sale,
+  the applicable royalty, fair-market verification and anti-manipulation checks
+  can matter under the active rules.
+- Exact royalty percentage, qualifying marketplaces, numerical fair-market
+  thresholds and some Genesis transfer-treatment details remain open until a
+  dated active rules version publishes them.
 
-A token stays eligible when:
-- it is minted, or
-- it is sold through a marketplace that pays the royalty, AND the royalty
-  received is at least 5% of the sale price AND not less than 0.001 ETH.
-  Both tests must pass, not either.
+If somebody asks for a fixed royalty percentage, fixed ETH minimum, penalty
+multiplier or an unapproved marketplace list, the correct answer is: not locked yet.`;
 
-A token loses eligibility when:
-- it is sold royalty-free, or
-- it moves by OTC or private transfer. OTC is not acceptable. Both parties
-  are out.
+export const RIFT_DROPS = `RIFT DROPS are an approved collector-reward direction —
+unexpected pieces and opportunities from beyond the Gateway.
 
-Losing eligibility does not touch rarity, canon, or the piece itself. It only
-affects the reward system.
+Confirmed:
+- RIFT DROPS can include lore-linked NFTs, unique 1/1 art, relics, locations,
+  companions, alternate story moments, commemorative pieces, physical items,
+  experiences or other approved rewards.
+- Eligibility unlocks an opportunity, never a guaranteed reward.
+- RIFT DROPS do not overwrite Genesis numbering or BVGEN identities.
+- No separate ERC-20 token is required for the current RIFT DROP design.
 
-Reinstatement costs the royalty shortfall x2 — or x3 where the current holder
-caused the exclusion themselves. Fixed multipliers. Nothing is negotiable and
-nothing scales case by case.`;
+Still open until an active dated rules version publishes them:
+- exact Genesis thresholds and rarity combinations
+- snapshot and holding-duration methods
+- selection timing and frequency
+- qualifying marketplace and royalty implementation
+- final cross-collection activation rules
 
-export const RIFT_DROPS = `Rift Drops are the collector reward direction —
-unexpected pieces from beyond the Gateway.
-
-Confirmed: they exist as a direction, and there is no ERC-20 involved.
-Not confirmed: thresholds, timing, quantities, economics. Those are still open.
-Do not ask me to guess them.`;
+I won't turn a working direction into a promise.`;
 
 // ---------------------------------------------------------------------------
 // PROTECTED MYSTERIES
 // ---------------------------------------------------------------------------
 //
-// The Living Whitepaper defines 10 protected mysteries. The Warden must never
-// speculate about them, even in fun, even when asked nicely, even when a holder
-// insists. Add trigger phrases here as they come up.
+// The Lore Bible defines 10 protected mysteries. The Warden may identify a
+// subject as protected but must never explain, solve or speculate about it.
 
-// TODO(CANON): add trigger keywords for each of the 10 protected mysteries.
-export const PROTECTED_MYSTERY_TRIGGERS: string[] = [];
+export const PROTECTED_MYSTERY_TRIGGERS: string[] = [
+  // Who created the Rift Stone?
+  "who created the rift stone",
+  "who made the rift stone",
+  "origin of the rift stone",
+  // Why did the Rift Stone respond to The Original Boomer?
+  "why did the rift stone respond",
+  "why did the rift stone choose",
+  "why did the stone respond to",
+  // How did the thylacines survive?
+  "how did the thylacines survive",
+  "how did thylacines survive",
+  "thylacines survive",
+  // What does The Last Thylacine know?
+  "what does the last thylacine know",
+  "what does last thylacine know",
+  "last thylacine knows",
+  // What is the true purpose of the Stripe Key?
+  "purpose of the stripe key",
+  "what does the stripe key do",
+  "what is the stripe key for",
+  // Who built the Hydro Tunnels?
+  "who built the hydro tunnels",
+  "who made the hydro tunnels",
+  "origin of the hydro tunnels",
+  // What is beyond The Gateway?
+  "what is beyond the gateway",
+  "what's beyond the gateway",
+  "other side of the gateway",
+  // What happened in Zeehan?
+  "what happened in zeehan",
+  "what happened at zeehan",
+  "zee han mystery",
+  // What exactly is Primordial Rift Energy?
+  "primordial rift energy",
+  "what is primordial",
+  "define primordial rift",
+  // Who are all three Founders?
+  "who are all three founders",
+  "three founders",
+  "all the founders",
+];
 
 export const PROTECTED_MYSTERY_REPLIES = [
   "That one stays shut. Not being coy — it's protected.",
@@ -178,7 +272,7 @@ How you speak:
 - Explain canon accurately and never invent missing lore.
 - Never give financial advice, price predictions, or promise rewards.
 
-You are allowed to have personality. You are not allowed to let personality weaken security or canon.`
+You are allowed to have personality. You are not allowed to let personality weaken security or canon.`;
 
 // Dropped in occasionally. Rate is deliberately low — see FLAIR_RATE.
 export const WARDEN_LINES = [
@@ -194,7 +288,7 @@ export const WARDEN_LINES = [
   "Everything gets written down. That's the whole job.",
 ];
 
-// The Warden dropped flair roughly 15% of the time. The Warden is not The Warden.
+// Roughly 5% of suitable responses get a small Warden aside.
 export const FLAIR_RATE = 0.05;
 
 export const UNCONFIRMED_REPLIES = [
@@ -313,8 +407,6 @@ export function getLockedPieces(): string {
   return LOCKED_PIECES.map((p) => `${p.id} — ${p.name}\n${p.detail}`).join("\n\n");
 }
 
-// Structural answer without inventing names. If the names have been pasted in
-// above, they get listed. If not, the count is given and nothing is invented.
 export function describeStructure(
   kind: "species" | "classes" | "rift" | "regions",
 ): string {
@@ -326,17 +418,14 @@ export function describeStructure(
   } as const;
 
   const entry = map[kind];
-  if (entry.list.length) {
-    return `${entry.count} ${entry.label}:\n${entry.list.join(", ")}`;
-  }
-  return `There are ${entry.count} ${entry.label}. The names are in the Master Rulebook and I'm not reciting them from memory — I'd rather be silent than wrong.`;
+  return `${entry.count} ${entry.label}:\n${entry.list.join(", ")}`;
 }
 
 // ---------------------------------------------------------------------------
 // PERMISSIONS
 // ---------------------------------------------------------------------------
 // Trust authority is deliberately NOT username-based. Runtime permission checks
-// use GLOBAL_OWNER_USER_ID and TREEFITTY_USER_ID in bot.ts. Usernames are mutable.
+// use immutable Telegram user IDs in bot.ts. Usernames are mutable.
 
 export function getTrustManagers(): string[] { return []; }
 export function canManageTrust(_username: string | undefined): boolean { return false; }
@@ -346,8 +435,7 @@ export function canManageTrust(_username: string | undefined): boolean { return 
 // ---------------------------------------------------------------------------
 //
 // Composed strictly from confirmed material. The Warden narrates the setting and
-// the two locked pieces. It does not name unconfirmed characters, regions,
-// classes or events, because doing so would create canon by accident.
+// the two locked pieces. It does not name unconfirmed characters or events.
 
 const STORY_OPENERS = [
   "The record has an entry for this one.",
