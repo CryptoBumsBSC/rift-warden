@@ -981,6 +981,8 @@ const HATE_SPEECH_WARNING_RESET = 24 * 60 * 60 * 1000; // 24 hours
 const uniqueInteractionsCache = new Map<string, { users: Set<string>; date: string }>();
 
 // === TRUST SYSTEM CONFIGURATION ===
+const AUTO_TRUST_DAYS = 7;
+const AUTO_TRUST_MESSAGES = 5;
 const TRUST_ELIGIBILITY_DAYS = 45; // Days before user can earn trust
 const TRUST_DAILY_CAP = 10; // Max trust points per day
 const TRUST_WEEKLY_CAP = 50; // Max trust points per week
@@ -3544,6 +3546,12 @@ async function getCommunityTrustClass(userId: string, chatId: string): Promise<C
     if (rec.trustStatus === "restricted" || rec.isFrozen) return "restricted";
     if ((rec.trustScore || 0) >= 100 || (rec.trustLevel || 0) >= 3) return "full";
     if ((rec.trustScore || 0) >= 50 || (rec.trustLevel || 0) >= 2 || rec.isTrusted) return "trusted";
+    // Auto-trust: 7+ days in the group, at least 5 real messages, no offences.
+    const daysIn = rec.joinDate ? (Date.now() - new Date(rec.joinDate).getTime()) / 86400000 : 0;
+    if (daysIn >= AUTO_TRUST_DAYS && (rec.meaningfulMsgCount || 0) >= AUTO_TRUST_MESSAGES) {
+      const off = await getUserOffenses(Number(chatId), Number(userId));
+      if (off.count === 0) return "trusted";
+    }
   } catch {}
   return "normal";
 }
@@ -5272,9 +5280,9 @@ Use /trustpoints to learn how to earn more!`);
   bot.command("trust", async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
     
-    const ownerCheck = canManageCommunityTrust(ctx);
+    const ownerCheck = canManageCommunityTrust(ctx) || (ctx.chat.id < 0 && await isUserAdmin(ctx, ctx.from.id));
     if (!ownerCheck) {
-      await ctx.reply("Only @aussieboomer or @TreeFitty can vouch for members!");
+      await ctx.reply("Only group admins can vouch for members!");
       return;
     }
     
@@ -5324,7 +5332,7 @@ Use /trustpoints to learn how to earn more!`);
       })
       .where(and(eq(trustScores.telegramUserId, targetUserId), eq(trustScores.chatId, chatId)));
     
-    await ctx.reply(`${targetFirstName || targetUsername} has been VOUCHED by the owner!
+    await ctx.reply(`${targetFirstName || targetUsername} has been VOUCHED by an admin!
 
 They now have trusted status and can bypass the 45-day eligibility requirement.`);
   });
@@ -5505,9 +5513,9 @@ TIP: For best results, select usernames from the autocomplete menu when typing @
   bot.command("untrust", async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
     
-    const ownerCheck = canManageCommunityTrust(ctx);
+    const ownerCheck = canManageCommunityTrust(ctx) || (ctx.chat.id < 0 && await isUserAdmin(ctx, ctx.from.id));
     if (!ownerCheck) {
-      await ctx.reply("Only @aussieboomer or @TreeFitty can remove trust status!");
+      await ctx.reply("Only group admins can remove trust status!");
       return;
     }
     

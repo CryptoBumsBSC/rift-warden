@@ -2225,6 +2225,8 @@ function detectEmojiSpam(text2) {
 }
 var HATE_SPEECH_WARNING_RESET = 24 * 60 * 60 * 1e3;
 var uniqueInteractionsCache = /* @__PURE__ */ new Map();
+var AUTO_TRUST_DAYS = 7;
+var AUTO_TRUST_MESSAGES = 5;
 var TRUST_ELIGIBILITY_DAYS = 45;
 var TRUST_DAILY_CAP = 10;
 var TRUST_WEEKLY_CAP = 50;
@@ -4120,6 +4122,11 @@ async function getCommunityTrustClass(userId, chatId) {
     if (rec.trustStatus === "restricted" || rec.isFrozen) return "restricted";
     if ((rec.trustScore || 0) >= 100 || (rec.trustLevel || 0) >= 3) return "full";
     if ((rec.trustScore || 0) >= 50 || (rec.trustLevel || 0) >= 2 || rec.isTrusted) return "trusted";
+    const daysIn = rec.joinDate ? (Date.now() - new Date(rec.joinDate).getTime()) / 864e5 : 0;
+    if (daysIn >= AUTO_TRUST_DAYS && (rec.meaningfulMsgCount || 0) >= AUTO_TRUST_MESSAGES) {
+      const off = await getUserOffenses(Number(chatId), Number(userId));
+      if (off.count === 0) return "trusted";
+    }
   } catch {
   }
   return "normal";
@@ -5561,9 +5568,9 @@ Use /trustpoints to learn how to earn more!`);
   });
   bot.command("trust", async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
-    const ownerCheck = canManageCommunityTrust(ctx);
+    const ownerCheck = canManageCommunityTrust(ctx) || ctx.chat.id < 0 && await isUserAdmin(ctx, ctx.from.id);
     if (!ownerCheck) {
-      await ctx.reply("Only @aussieboomer or @TreeFitty can vouch for members!");
+      await ctx.reply("Only group admins can vouch for members!");
       return;
     }
     let targetUserId;
@@ -5603,7 +5610,7 @@ Use /trustpoints to learn how to earn more!`);
       vouchedBy: String(ctx.from.id),
       vouchedAt: /* @__PURE__ */ new Date()
     }).where(and(eq2(trustScores.telegramUserId, targetUserId), eq2(trustScores.chatId, chatId)));
-    await ctx.reply(`${targetFirstName || targetUsername} has been VOUCHED by the owner!
+    await ctx.reply(`${targetFirstName || targetUsername} has been VOUCHED by an admin!
 
 They now have trusted status and can bypass the 45-day eligibility requirement.`);
   });
@@ -5742,9 +5749,9 @@ ${results.errors.join(", ")}
   });
   bot.command("untrust", async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
-    const ownerCheck = canManageCommunityTrust(ctx);
+    const ownerCheck = canManageCommunityTrust(ctx) || ctx.chat.id < 0 && await isUserAdmin(ctx, ctx.from.id);
     if (!ownerCheck) {
-      await ctx.reply("Only @aussieboomer or @TreeFitty can remove trust status!");
+      await ctx.reply("Only group admins can remove trust status!");
       return;
     }
     let targetUserId;
