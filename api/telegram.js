@@ -4569,7 +4569,7 @@ function createBot() {
   bot.command("info", async (ctx) => {
     await ctx.reply(PROJECT_INFO2);
   });
-  bot.command("radio", async (ctx) => {
+  const sendRadio = async (ctx) => {
     if (!RIFT_RADIO_URL) {
       await ctx.reply("Rift Radio is fitted, but the station URL is not live yet. Once PUBLIC_URL is set on the deployment, I'll put it on the dial.");
       return;
@@ -4579,8 +4579,9 @@ function createBot() {
       "RIFT RADIO \u2014 TWELVE SIGNALS\n\nAmbient, deep space, old-time radio, Australian music, documentary and birdsong. Pick a frequency and leave it running. I won't judge the choice. Much.",
       { reply_markup: { inline_keyboard: [[button]] } }
     );
-  });
-  bot.command("games", async (ctx) => {
+  };
+  bot.command("radio", sendRadio);
+  const sendGames = async (ctx) => {
     const ARCADE = "https://boomerverse-adzz.vercel.app";
     const GAMES = [
       ["RIFT CRITTERS", "rift-critters.html"],
@@ -4598,6 +4599,12 @@ function createBot() {
       "BOOMERVERSE ARCADE \u2014 SIX GAMES\n\nPick one. Scores stay on your own device. " + (isPrivate ? "" : "Open this in a private chat with me to play inside Telegram."),
       { reply_markup: { inline_keyboard: rows } }
     );
+  };
+  bot.command("games", sendGames);
+  bot.hears(/^\s*(games?|radio)\s*[!?.]*\s*$/i, async (ctx) => {
+    const w = ctx.match[1].toLowerCase();
+    if (w === "radio") await sendRadio(ctx);
+    else await sendGames(ctx);
   });
   bot.command("fact", async (ctx) => {
     const fact = getRandomItem2(FACTS);

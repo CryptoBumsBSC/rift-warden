@@ -4283,7 +4283,7 @@ export function createBot(): Bot<MyContext> {
 
   // /radio - Rift Radio. Telegram only permits Web App inline buttons in private
   // chats; group buttons use the same HTTPS URL and still open cleanly in Telegram.
-  bot.command("radio", async (ctx) => {
+  const sendRadio = async (ctx: MyContext) => {
     if (!RIFT_RADIO_URL) {
       await ctx.reply("Rift Radio is fitted, but the station URL is not live yet. Once PUBLIC_URL is set on the deployment, I'll put it on the dial.");
       return;
@@ -4297,11 +4297,12 @@ export function createBot(): Bot<MyContext> {
       "RIFT RADIO — TWELVE SIGNALS\n\nAmbient, deep space, old-time radio, Australian music, documentary and birdsong. Pick a frequency and leave it running. I won't judge the choice. Much.",
       { reply_markup: { inline_keyboard: [[button]] } }
     );
-  });
+  };
+  bot.command("radio", sendRadio);
 
   // /games - Boomerverse arcade. Same pattern as /radio: Web App buttons in private
   // chats (play inside Telegram), plain links in groups.
-  bot.command("games", async (ctx) => {
+  const sendGames = async (ctx: MyContext) => {
     const ARCADE = "https://boomerverse-adzz.vercel.app";
     const GAMES: Array<[string, string]> = [
       ["RIFT CRITTERS", "rift-critters.html"],
@@ -4322,6 +4323,13 @@ export function createBot(): Bot<MyContext> {
         (isPrivate ? "" : "Open this in a private chat with me to play inside Telegram."),
       { reply_markup: { inline_keyboard: rows } }
     );
+  };
+  bot.command("games", sendGames);
+
+  // Plain words work too: "game", "games" or "radio" on their own.
+  bot.hears(/^\s*(games?|radio)\s*[!?.]*\s*$/i, async (ctx) => {
+    const w = (ctx.match as RegExpMatchArray)[1].toLowerCase();
+    if (w === "radio") await sendRadio(ctx); else await sendGames(ctx);
   });
 
   // /fact - Random medical fact
