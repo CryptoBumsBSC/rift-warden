@@ -5352,12 +5352,71 @@ function wordIn(text2, word) {
   const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
   return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(text2);
 }
+var PTRACK_KEY = (chatId) => `w:ptrack:${chatId}`;
+var PILE_KEY = (chatId) => `w:pile:${chatId}`;
+var PILEFREEZE_KEY = (chatId) => `w:pilefreeze:${chatId}`;
+var PILE_LIMIT = 3;
+var PILE_WINDOW_MS = 10 * 60 * 1e3;
+var PILE_FREEZE_MS = 10 * 60 * 1e3;
+var PROTECTED_PRONOUNS = /\b(she|her|hers|herself|that (girl|woman|lady|chick|person)|this (girl|woman|lady|person))\b/i;
+async function alertProtectedOwners(api, text2) {
+  for (const id of protectedAlertIds()) {
+    try {
+      await api.sendMessage(Number(id), text2);
+    } catch {
+    }
+  }
+}
+async function checkPileOn(ctx, chatId) {
+  try {
+    const now = Date.now();
+    const hits = (await stateGet(PILE_KEY(chatId), [])).filter((t) => now - t < PILE_WINDOW_MS);
+    hits.push(now);
+    await stateSet(PILE_KEY(chatId), hits, 1800);
+    if (hits.length < PILE_LIMIT) return;
+    if (await stateGet(FREEZE_KEY(chatId), null)) return;
+    await freezeChat(ctx.api, chatId);
+    await stateSet(PILEFREEZE_KEY(chatId), { until: now + PILE_FREEZE_MS }, 3600);
+    await stateDel(PILE_KEY(chatId));
+    await ctx.api.sendMessage(chatId, "Chat paused for 10 minutes to cool things down. Back soon.");
+    await alertProtectedOwners(ctx.api, `PILE-ON ALERT
+Group: ${ctx.chat?.title || chatId}
+${PILE_LIMIT} hostile messages aimed at a protected member in 10 minutes. I paused the chat for 10 minutes. Use /unlock to open it sooner.`);
+  } catch (e) {
+    console.log("Pile-on check failed:", e);
+  }
+}
+async function releasePileFreezes(api) {
+  for (const chatId of Array.from(activeChats)) {
+    try {
+      const pf = await stateGet(PILEFREEZE_KEY(chatId), null);
+      if (!pf || pf.until > Date.now()) continue;
+      await unfreezeChat(api, Number(chatId)).catch(() => false);
+      await stateDel(PILEFREEZE_KEY(chatId));
+      try {
+        await api.sendMessage(Number(chatId), "Chat is open again. Keep it kind.");
+      } catch {
+      }
+    } catch {
+    }
+  }
+}
 async function captureProtectedId(ctx) {
   const from = ctx.from, chat = ctx.chat;
   if (!from || !chat || chat.id >= 0) return;
   const list = await getProtected(chat.id);
   const hit = list.find((p) => p.id && p.id === String(from.id) || !p.id && p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase());
   if (!hit) return;
+  try {
+    const mid = ctx.message?.message_id;
+    if (mid) {
+      const tr = await stateGet(PTRACK_KEY(chat.id), { ids: [], lastHer: 0 });
+      tr.ids = [...tr.ids, mid].slice(-200);
+      tr.lastHer = Date.now();
+      await stateSet(PTRACK_KEY(chat.id), tr, 24 * 60 * 60);
+    }
+  } catch {
+  }
   const first = (from.first_name || "").trim(), last = (from.last_name || "").trim();
   if (hit.id === String(from.id) && hit.first === first && hit.last === last && hit.username === (from.username || hit.username)) return;
   hit.id = String(from.id);
@@ -5385,16 +5444,57 @@ async function holdProtectedHarassment(ctx, text2, messageId) {
     targeted = list.find((p) => protectedWords(p).some((w) => wordIn(text2, w))) || (quoted ? list.find((p) => protectedWords(p).some((w) => wordIn(quoted, w)) || p.username && quoted.toLowerCase().includes("@" + p.username.toLowerCase())) : void 0);
     nameOnly = !!targeted;
   }
+  let threadHit = false, pronounHit = false;
+  const track = await stateGet(PTRACK_KEY(chat.id), { ids: [], lastHer: 0 });
+  if (!targeted) {
+    const replyId = msg.reply_to_message?.message_id;
+    threadHit = !!replyId && track.ids.includes(replyId);
+    pronounHit = !threadHit && PROTECTED_PRONOUNS.test(text2) && Date.now() - track.lastHer < 15 * 60 * 1e3;
+    if (threadHit || pronounHit) {
+      targeted = list[0];
+      nameOnly = true;
+    }
+  } else if (msg.reply_to_message?.message_id && track.ids.includes(msg.reply_to_message.message_id)) {
+    threadHit = true;
+  }
   if (!targeted) return false;
   if (await isUserAdmin(ctx, from.id)) return false;
-  let hostile = false, aboutThem = !nameOnly, confident = !nameOnly, reason = "";
+  const trackMsg = async () => {
+    try {
+      track.ids = [...track.ids, messageId].slice(-200);
+      await stateSet(PTRACK_KEY(chat.id), track, 24 * 60 * 60);
+    } catch {
+    }
+  };
+  if (!nameOnly && !wasEdit) {
+    try {
+      const trust = await getCommunityTrustClass(String(from.id), String(chat.id));
+      if (trust !== "trusted" && trust !== "full") {
+        await ensureUserModerationStatus(String(from.id), String(chat.id));
+        const st = await getUserModerationStatus(String(from.id), String(chat.id));
+        const joined = st?.joinDate ? new Date(st.joinDate).getTime() : Date.now();
+        if (Date.now() - joined < 24 * 60 * 60 * 1e3) {
+          try {
+            await ctx.api.deleteMessage(chat.id, messageId);
+          } catch {
+          }
+          await logViolation(String(chat.id), String(from.id), from.username || "", "protected_new_member", text2.slice(0, 120), "New member (under 24 hours) replied to or tagged a protected member", "delete");
+          await incrementModStat(String(chat.id), "messagesBlocked");
+          return true;
+        }
+      }
+    } catch (e) {
+      console.log("Protected newcomer check failed:", e);
+    }
+  }
+  let hostile = false, severe = false, aboutThem = !nameOnly, confident = !nameOnly, reason = "";
   try {
     const quotedCtx = nameOnly ? String(msg.reply_to_message?.text || "").slice(0, 400) : "";
     const ai = await openai3.chat.completions.create({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "You protect a community member from being picked on. Decide if the message below is hostile toward the protected member: insults, mockery, put-downs, sarcasm meant to demean, harassment, sexual remarks, threats, belittling them, or stirring others up against them. Friendly or neutral messages, questions and compliments are NOT hostile. " + (nameOnly ? `The message was not sent to them directly. It may mention their name (${protectedWords(targeted).join(", ")}), which could also belong to someone else. Set about_protected true ONLY if it is clearly about the protected member. ` : "It is aimed at the protected member. ") + 'Reply JSON only: {"hostile": true or false, "about_protected": true or false, "confidence": "high" or "low", "reason": "short reason"}.' },
+        { role: "system", content: "You protect a community member from being picked on. Decide if the message below is hostile toward the protected member: insults, mockery, put-downs, sarcasm meant to demean, harassment, sexual remarks, threats, belittling them, or stirring others up against them. Friendly or neutral messages, questions and compliments are NOT hostile. " + (nameOnly ? threadHit || pronounHit ? `The message was not sent to them directly and may not name them. It sits in a conversation about the protected member (${threadHit ? "it replies inside a thread under their posts" : "they posted a few minutes ago and it uses she/her words"}). Set about_protected true if it is plausibly about them. ` : `The message was not sent to them directly. It may mention their name (${protectedWords(targeted).join(", ")}), which could also belong to someone else. Set about_protected true ONLY if it is clearly about the protected member. ` : "It is aimed at the protected member. ") + 'Set severe true ONLY for slurs, threats of harm, or sexual remarks/sexual harassment about them. Reply JSON only: {"hostile": true or false, "about_protected": true or false, "severe": true or false, "confidence": "high" or "low", "reason": "short reason"}.' },
         { role: "user", content: (quotedCtx ? `(Replying to: ${quotedCtx})
 ` : "") + text2.slice(0, 1200) }
       ],
@@ -5402,14 +5502,16 @@ async function holdProtectedHarassment(ctx, text2, messageId) {
     });
     const v = JSON.parse(ai.choices[0]?.message?.content || "{}");
     hostile = v.hostile === true;
+    severe = v.severe === true;
     if (nameOnly) {
       aboutThem = v.about_protected === true;
-      confident = v.confidence === "high";
+      confident = v.confidence === "high" || threadHit;
     }
     reason = String(v.reason || "hostile toward a protected member").slice(0, 100);
   } catch {
     return false;
   }
+  if (threadHit || hostile && aboutThem) await trackMsg();
   if (!hostile || !aboutThem) return false;
   if (!confident) {
     const who = from.username ? `@${from.username}` : from.first_name || String(from.id);
@@ -5429,6 +5531,24 @@ It looks like it may be hostile toward a protected member, but I wasn't sure eno
   try {
     await ctx.api.deleteMessage(chat.id, messageId);
   } catch {
+  }
+  if (severe) {
+    try {
+      const who = from.username ? `@${from.username}` : from.first_name || "A member";
+      await ctx.api.banChatMember(chat.id, from.id);
+      await ctx.api.sendMessage(chat.id, `${who} removed. Keep it kind in here.`);
+      await logViolation(String(chat.id), String(from.id), from.username || "", "protected_member", text2.slice(0, 120), `${wasEdit ? "Edited message. " : ""}Severe, aimed at a protected member: ${reason}`, "ban");
+      await incrementModStat(String(chat.id), "messagesBlocked");
+      await alertProtectedOwners(ctx.api, `PROTECTED-MEMBER BAN
+Group: ${chat.title || chat.id}
+Banned: ${who}
+Reason: ${reason}
+Message: ${text2.slice(0, 300)}`);
+    } catch (e) {
+      console.log("Protected severe ban failed:", e);
+    }
+    await checkPileOn(ctx, chat.id);
+    return true;
   }
   try {
     let r = await addOffense(chat.id, from.id);
@@ -5455,6 +5575,7 @@ It looks like it may be hostile toward a protected member, but I wasn't sure eno
   } catch (e) {
     console.log("Protected-member hold failed:", e);
   }
+  await checkPileOn(ctx, chat.id);
   return true;
 }
 async function privateOwnerReply(ctx, text2) {
@@ -12374,6 +12495,12 @@ async function runCronTick() {
   setBotInstance(bot);
   registerBotApi(bot.api);
   await loadActiveChats();
+  try {
+    await releasePileFreezes(bot.api);
+    ran.push("pile-release");
+  } catch (err) {
+    console.error("[cron] pile release failed:", err);
+  }
   try {
     await sweepUnverifiedJoins(bot);
     ran.push("captcha-sweep");
