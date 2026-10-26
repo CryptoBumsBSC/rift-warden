@@ -4325,7 +4325,7 @@ async function holdMarketingPitch(ctx: MyContext, text: string, messageId: numbe
   if (!containsMarketingPitch(text)) return false;
   if (await isUserAdmin(ctx, from.id)) return false;
   await punishRestrictedContent(ctx, messageId, text, "marketing_pitch",
-    "Advertising and promotion pitches aren't allowed here. If you have a genuine partnership idea, ask an admin.");
+    "No promos or marketing allowed in the chat. If you want to talk business, the only way is in a voice chat with the admins. Ask an admin and take it from there.");
   // Also flag it to the admins so they can see who is pitching.
   try {
     const admins = await ctx.api.getChatAdministrators(chat.id);

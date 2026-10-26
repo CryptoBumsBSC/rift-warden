@@ -4641,7 +4641,7 @@ async function holdMarketingPitch(ctx, text2, messageId) {
     messageId,
     text2,
     "marketing_pitch",
-    "Advertising and promotion pitches aren't allowed here. If you have a genuine partnership idea, ask an admin."
+    "No promos or marketing allowed in the chat. If you want to talk business, the only way is in a voice chat with the admins. Ask an admin and take it from there."
   );
   try {
     const admins = await ctx.api.getChatAdministrators(chat.id);
