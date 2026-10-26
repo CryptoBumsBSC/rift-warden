@@ -8264,6 +8264,50 @@ I need ban permission to enforce this.`
       await ctx.answerCallbackQuery({ text: "Oops, couldn't save that feedback!" });
     }
   });
+  const NEW_MEMBER_MEDIA_HOURS = 1;
+  bot.on(["message:photo", "message:video", "message:animation", "message:video_note"], async (ctx, next) => {
+    const chatId = ctx.chat?.id;
+    const from = ctx.from;
+    if (!chatId || chatId >= 0 || !from || from.is_bot) {
+      await next();
+      return;
+    }
+    const chatIdStr = String(chatId), userIdStr = String(from.id);
+    try {
+      const trust = await getCommunityTrustClass(userIdStr, chatIdStr);
+      if (trust === "full" || trust === "trusted") {
+        await next();
+        return;
+      }
+      if (await isUserAdmin(ctx, from.id)) {
+        await next();
+        return;
+      }
+      await ensureUserModerationStatus(userIdStr, chatIdStr);
+      const status = await getUserModerationStatus(userIdStr, chatIdStr);
+      const joined = status?.joinDate ? new Date(status.joinDate).getTime() : Date.now();
+      const hours = (Date.now() - joined) / (1e3 * 60 * 60);
+      if (hours >= NEW_MEMBER_MEDIA_HOURS || status?.role !== "newbie") {
+        await next();
+        return;
+      }
+      try {
+        await ctx.api.deleteMessage(chatId, ctx.message.message_id);
+      } catch {
+      }
+      await incrementModStat(chatIdStr, "messagesBlocked");
+      const noticeKey = `w:medianotice:${chatIdStr}:${userIdStr}`;
+      if (!await stateGet(noticeKey, false)) {
+        await stateSet(noticeKey, true, 60 * 60);
+        const who = from.username ? `@${from.username}` : from.first_name || "friend";
+        await ctx.api.sendMessage(chatId, `${who}, pictures and video open up an hour after you join. Words are fine until then. Welcome in.`);
+      }
+      return;
+    } catch (e) {
+      console.log("New-member media check failed:", e);
+      await next();
+    }
+  });
   bot.on(["message:photo", "message:video", "message:document", "message:animation"], async (ctx, next) => {
     const caption = ctx.message.caption;
     if (!caption) {
