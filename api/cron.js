@@ -4654,11 +4654,8 @@ var ANY_CRYPTO_ADDRESS = /0x[a-fA-F0-9]{40}|\bbc1[a-z0-9]{25,60}\b|\b[13][a-km-z
 function containsCryptoAddress(text2) {
   return ANY_CRYPTO_ADDRESS.test(text2 || "");
 }
-async function holdCryptoAddress(ctx, text2, messageId) {
+async function punishRestrictedContent(ctx, messageId, text2, type, why) {
   const from = ctx.from, chat = ctx.chat;
-  if (!from || !chat || from.is_bot || chat.id >= 0) return false;
-  if (!containsCryptoAddress(text2)) return false;
-  if (await isUserAdmin(ctx, from.id)) return false;
   try {
     await ctx.api.deleteMessage(chat.id, messageId);
   } catch {
@@ -4668,7 +4665,7 @@ async function holdCryptoAddress(ctx, text2, messageId) {
     const who = from.username ? `@${from.username}` : from.first_name || "A member";
     if (shouldBan) {
       await ctx.api.banChatMember(chat.id, from.id);
-      await ctx.api.sendMessage(chat.id, `${who} removed after repeated offences. Contract and wallet addresses are admin-only here.`);
+      await ctx.api.sendMessage(chat.id, `${who} removed after repeated offences. ${why}`);
     } else {
       await ctx.api.restrictChatMember(
         chat.id,
@@ -4676,13 +4673,44 @@ async function holdCryptoAddress(ctx, text2, messageId) {
         { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
         { until_date: Math.floor(Date.now() / 1e3) + muteSeconds }
       );
-      await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). Contract, token and wallet addresses are admin-only in this group. It keeps scammers from slipping fake ones in. Official addresses are in the pinned messages.`);
+      await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). ${why}`);
     }
-    await logViolation(String(chat.id), String(from.id), from.username || "", "crypto_address", text2.slice(0, 120), "address posted by non-admin", shouldBan ? "ban" : "mute");
+    await logViolation(String(chat.id), String(from.id), from.username || "", type, text2.slice(0, 120), why, shouldBan ? "ban" : "mute");
     await incrementModStat(String(chat.id), "scamsBlocked");
   } catch (e) {
-    console.log("Crypto address hold failed:", e);
+    console.log(`${type} hold failed:`, e);
   }
+}
+async function holdCryptoAddress(ctx, text2, messageId) {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot || chat.id >= 0) return false;
+  if (!containsCryptoAddress(text2)) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  await punishRestrictedContent(
+    ctx,
+    messageId,
+    text2,
+    "crypto_address",
+    "Contract, token and wallet addresses are admin-only in this group. It keeps scammers from slipping fake ones in. Official addresses are in the pinned messages."
+  );
+  return true;
+}
+var ADMIN_ONLY_WORDS = /\bjust[\s_.\-]*fomo|\bfomo[\s_.\-]*daily/i;
+function containsAdminOnlyWord(text2) {
+  return ADMIN_ONLY_WORDS.test(text2 || "");
+}
+async function holdAdminOnlyWord(ctx, text2, messageId) {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot || chat.id >= 0) return false;
+  if (!containsAdminOnlyWord(text2)) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  await punishRestrictedContent(
+    ctx,
+    messageId,
+    text2,
+    "banned_word",
+    "That word is admin-only in this group."
+  );
   return true;
 }
 function createBot() {
@@ -7752,7 +7780,7 @@ To get a group's chatId, use /communities first.`
     const hasSeedPhrase = detectSeedPhrase(newText);
     const drainerPhrases = ["verify wallet", "sync wallet", "connect wallet urgently", "wallet validation", "claim airdrop"];
     const hasWalletDrainer = drainerPhrases.some((phrase) => lowerText.includes(phrase));
-    const hasContractAddress = containsCryptoAddress(newText);
+    const hasContractAddress = containsCryptoAddress(newText) || containsAdminOnlyWord(newText);
     let shouldDelete = false;
     let violationType = "";
     let actionTaken = "";
@@ -7815,7 +7843,7 @@ To get a group's chatId, use /communities first.`
     const { isScam, flags } = detectScam(caption, username);
     const hasLink = /https?:\/\/|t\.me\/|@\w+/i.test(caption);
     const hasWalletDrainer = ["verify wallet", "sync wallet", "connect wallet urgently"].some((p) => lowerCaption.includes(p));
-    const hasContractAddress = containsCryptoAddress(caption);
+    const hasContractAddress = containsCryptoAddress(caption) || containsAdminOnlyWord(caption);
     let shouldDelete = false;
     let violationType = "";
     if (isScam && flags.length >= 2 || _editTrust !== "trusted" && hasUnapprovedLink(caption, ctx.editedMessage.caption_entities) || hasWalletDrainer || hasContractAddress) {
@@ -8489,6 +8517,7 @@ I need ban permission to enforce this.`
       return;
     }
     if (await holdCryptoAddress(ctx, caption, ctx.message.message_id)) return;
+    if (await holdAdminOnlyWord(ctx, caption, ctx.message.message_id)) return;
     if (communityTrust === "trusted") {
       if (await enforceTrustedLinkContractRules(ctx, caption)) return;
       await next();
@@ -8843,6 +8872,7 @@ Admins, please review!`,
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
       if (await holdCryptoAddress(ctx, text2, ctx.message.message_id)) return;
+      if (await holdAdminOnlyWord(ctx, text2, ctx.message.message_id)) return;
       if (communityTrust !== "trusted" && await holdLinkFromUntrusted(ctx)) return;
     }
     ctx.session.lastActivityTime = Date.now();
