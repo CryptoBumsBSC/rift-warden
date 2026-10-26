@@ -4570,7 +4570,11 @@ async function punishRestrictedContent(ctx, messageId, text2, type, why) {
         { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
         { until_date: Math.floor(Date.now() / 1e3) + muteSeconds }
       );
-      await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). ${why}`);
+      await ctx.api.sendMessage(
+        chat.id,
+        `${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). ${why}`,
+        { reply_markup: { inline_keyboard: [[{ text: "Think this is a mistake? Ask admins", callback_data: `appeal:${from.id}` }]] } }
+      );
     }
     await logViolation(String(chat.id), String(from.id), from.username || "", type, text2.slice(0, 120), why, shouldBan ? "ban" : "mute");
     await incrementModStat(String(chat.id), "scamsBlocked");
@@ -4717,6 +4721,135 @@ async function scanPhotoForScam(ctx) {
     return false;
   }
 }
+var FREEZE_KEY = (chatId) => `w:freeze:${chatId}`;
+var SCHED_KEY = (chatId) => `w:sched:${chatId}`;
+var HOLDERS_KEY = (chatId) => `w:holders:${chatId}`;
+async function canRunAdminCmd(ctx) {
+  if (!ctx.from || !ctx.chat) return false;
+  if (isGlobalOwner(ctx)) return true;
+  return ctx.chat.id < 0 && await isUserAdmin(ctx, ctx.from.id);
+}
+async function freezeChat(api, chatId) {
+  let prev = null;
+  try {
+    prev = (await api.getChat(chatId)).permissions || null;
+  } catch {
+  }
+  const existing = await stateGet(FREEZE_KEY(chatId), null);
+  if (!existing) await stateSet(FREEZE_KEY(chatId), { prev, at: Date.now() }, 14 * 24 * 60 * 60);
+  await api.setChatPermissions(chatId, {
+    can_send_messages: false,
+    can_send_audios: false,
+    can_send_documents: false,
+    can_send_photos: false,
+    can_send_videos: false,
+    can_send_video_notes: false,
+    can_send_voice_notes: false,
+    can_send_polls: false,
+    can_send_other_messages: false,
+    can_add_web_page_previews: false
+  });
+}
+async function unfreezeChat(api, chatId) {
+  const saved = await stateGet(FREEZE_KEY(chatId), null);
+  if (!saved) return false;
+  const base = {
+    can_send_messages: true,
+    can_send_audios: true,
+    can_send_documents: true,
+    can_send_photos: true,
+    can_send_videos: true,
+    can_send_video_notes: true,
+    can_send_voice_notes: true,
+    can_send_polls: true,
+    can_send_other_messages: true,
+    can_add_web_page_previews: true
+  };
+  await api.setChatPermissions(chatId, saved.prev && Object.keys(saved.prev).length ? saved.prev : base);
+  await stateDel(FREEZE_KEY(chatId));
+  return true;
+}
+function localStamp() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: COMMUNITY_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(/* @__PURE__ */ new Date());
+  const g = (t) => parts.find((x) => x.type === t)?.value || "00";
+  return `${g("year")}-${g("month")}-${g("day")} ${g("hour")}:${g("minute")}`;
+}
+async function telegramImageDataUrl(api, fileId) {
+  try {
+    const file = await api.getFile(fileId);
+    if (!file.file_path) return null;
+    const res = await fetch(`https://api.telegram.org/file/bot${api.token}/${file.file_path}`);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > 3 * 1024 * 1024) return null;
+    return `data:image/jpeg;base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+async function profilePhotoFileId(api, userId) {
+  try {
+    const r = await api.getUserProfilePhotos(userId, { limit: 1 });
+    const sizes = r.photos?.[0];
+    if (!sizes || !sizes.length) return null;
+    return (sizes.find((x) => x.width >= 160) || sizes[sizes.length - 1]).file_id;
+  } catch {
+    return null;
+  }
+}
+async function checkProfilePhotoClone(ctx, member) {
+  if (member.is_bot || !ctx.chat || ctx.chat.id >= 0) return;
+  const chatId = ctx.chat.id;
+  try {
+    const { dateStr } = localParts();
+    const used = await stateIncr(`w:photoclone:${dateStr}`, 36 * 60 * 60);
+    if (used > 100) return;
+    const theirs = await profilePhotoFileId(ctx.api, member.id);
+    if (!theirs) return;
+    const admins = (await ctx.api.getChatAdministrators(chatId)).filter((a) => !a.user.is_bot && a.user.id !== member.id).slice(0, 4);
+    const refs = [];
+    for (const a of admins) {
+      const id = await profilePhotoFileId(ctx.api, a.user.id);
+      const url = id ? await telegramImageDataUrl(ctx.api, id) : null;
+      if (url) refs.push({ admin: a, url });
+    }
+    if (!refs.length) return;
+    const newUrl = await telegramImageDataUrl(ctx.api, theirs);
+    if (!newUrl) return;
+    const content = [
+      { type: "text", text: `Image 1 is a new member's profile picture. Images 2 onward are admins' profile pictures. Is image 1 the same picture as any of the others (an identical or near-identical copy, same logo, same artwork or same photo)? Different people who merely look alike or share a style do NOT count. Reply JSON only: {"match": true or false, "image": number}.` },
+      { type: "image_url", image_url: { url: newUrl, detail: "low" } }
+    ];
+    for (const r of refs) content.push({ type: "image_url", image_url: { url: r.url, detail: "low" } });
+    const ai = await Promise.race([
+      openai2.chat.completions.create({ model: "gpt-4o-mini", response_format: { type: "json_object" }, messages: [{ role: "user", content }], max_tokens: 40 }),
+      new Promise((resolve) => setTimeout(() => resolve(null), 8e3))
+    ]);
+    if (!ai) return;
+    const v = JSON.parse(ai.choices[0]?.message?.content || "{}");
+    if (v.match !== true) return;
+    const hit = refs[(v.image || 2) - 2] || refs[0];
+    const who = member.username ? `@${member.username}` : member.first_name || "A new member";
+    const target = hit.admin.user.username ? `@${hit.admin.user.username}` : hit.admin.user.first_name || "an admin";
+    const { muteSeconds, shouldBan } = await addOffense(chatId, member.id, true);
+    if (shouldBan) await ctx.api.banChatMember(chatId, member.id);
+    else await ctx.api.restrictChatMember(chatId, member.id, { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false }, { until_date: Math.floor(Date.now() / 1e3) + muteSeconds });
+    const mentions = admins.filter((a) => a.user.username).slice(0, 3).map((a) => `@${a.user.username}`).join(" ");
+    await ctx.api.sendMessage(chatId, `${mentions} IMPERSONATION ALERT: ${who} joined using a profile picture that copies ${target}. ${shouldBan ? "Removed." : `Muted for ${formatDuration(muteSeconds)}.`} Members: the real admins are the ones with the admin badge. The team never DMs first.`);
+    await logViolation(String(chatId), String(member.id), member.username || "", "impersonation_photo", member.username || "", `Profile picture copies ${target}`, shouldBan ? "ban" : "mute");
+    await incrementModStat(String(chatId), "scamsBlocked");
+  } catch (e) {
+    console.log("Profile photo check failed (allowed through):", e);
+  }
+}
 function createBot() {
   const bot = new Bot(BOT_TOKEN);
   botInstance = bot;
@@ -4764,7 +4897,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -5523,11 +5656,14 @@ For all owner-only remote commands: DM the bot and type /ownerhelp`
     try {
       const member = await ctx.api.getChatMember(chatId, ctx.from.id);
       const isAdmin2 = member.status === "administrator" || member.status === "creator";
-      if (!isAdmin2) {
+      if (!isAdmin2 && !isGlobalOwner(ctx)) {
         await ctx.reply("Only admins can end lockdown mode.");
         return;
       }
-      if (await isInLockdown(chatIdStr)) {
+      const wasFrozen = await unfreezeChat(ctx.api, chatId).catch(() => false);
+      if (wasFrozen && !await isInLockdown(chatIdStr)) {
+        await ctx.reply(`CHAT UNLOCKED. Everyone can post again. Unlocked by @${ctx.from.username || ctx.from.first_name}.`);
+      } else if (await isInLockdown(chatIdStr)) {
         await endLockdown(chatIdStr);
         await ctx.reply(
           `Lockdown Mode Ended
@@ -5550,21 +5686,21 @@ Normal operations resumed.`
     try {
       const member = await ctx.api.getChatMember(chatId, ctx.from.id);
       const isAdmin2 = member.status === "administrator" || member.status === "creator";
-      if (!isAdmin2) {
+      if (!isAdmin2 && !isGlobalOwner(ctx)) {
         await ctx.reply("Only admins can trigger lockdown mode.");
         return;
       }
-      if (await isInLockdown(chatIdStr)) {
-        await ctx.reply("Chat is already in lockdown mode. Use /unlock to end it.");
+      if (await stateGet(FREEZE_KEY(chatId), null)) {
+        await ctx.reply("Chat is already frozen. Use /unlock to open it again.");
       } else {
         await stateSet(KEYS.lockdown(chatIdStr), { active: true, until: Date.now() + LOCKDOWN_DURATION }, TTL.lockdown);
+        await freezeChat(ctx.api, chatId);
         await ctx.reply(
-          `LOCKDOWN MODE ACTIVATED
+          `CHAT FROZEN
 
-Triggered manually by @${ctx.from.username || ctx.from.first_name}.
+Triggered by @${ctx.from.username || ctx.from.first_name}.
 
-New users will be restricted for 5 minutes.
-Use /unlock to end early.`
+Only admins can post until /unlock is used. New joiners are restricted too.`
         );
       }
     } catch (e) {
@@ -6500,6 +6636,160 @@ Usernames can change. This number is what The Warden uses for secure role author
     } catch {
       await ctx.reply("Posted, but I couldn't pin it. Make me an admin with the Pin Messages right, then send /pinsafety again.");
     }
+  });
+  bot.command("log", async (ctx) => {
+    if (!ctx.chat || !ctx.from || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
+    const n = Math.min(40, Math.max(1, parseInt((ctx.match || "").toString(), 10) || 20));
+    const rows = await db.select().from(violationLogs).where(eq2(violationLogs.chatId, String(ctx.chat.id))).orderBy(desc(violationLogs.createdAt)).limit(n);
+    if (!rows.length) {
+      await ctx.reply("Nothing logged yet.");
+      return;
+    }
+    const lines = rows.map((r) => {
+      const t = r.createdAt ? new Intl.DateTimeFormat("en-AU", { timeZone: COMMUNITY_TIMEZONE, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(r.createdAt)) : "?";
+      const why = (r.violatingContent || "").replace(/\s+/g, " ").slice(0, 70);
+      return `${t} | ${(r.actionTaken || "logged").toUpperCase()} | ${r.username ? "@" + r.username : r.userId} | ${r.violationType.replace(/_/g, " ")}${why ? " | " + why : ""}`;
+    });
+    try {
+      await ctx.api.sendMessage(ctx.from.id, `WARDEN LOG: last ${rows.length} actions in ${ctx.chat.title || "the group"}
+
+${lines.join("\n")}`);
+      await ctx.reply("Log sent to you privately.");
+    } catch {
+      await ctx.reply("I can't message you yet. Open a private chat with me, send /start, then try /log again.");
+    }
+  });
+  bot.command("schedule", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
+    const m = (ctx.match || "").toString().trim().match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})\s+([\s\S]{3,})$/);
+    if (!m) {
+      await ctx.reply("Usage: /schedule 2026-11-01 18:30 Your message here\n(date as YYYY-MM-DD, 24-hour time, in the group's local time)");
+      return;
+    }
+    const when = `${m[1]} ${m[2].padStart(2, "0")}:${m[3]}`;
+    if (when <= localStamp()) {
+      await ctx.reply("That time has already passed.");
+      return;
+    }
+    const list = await stateGet(SCHED_KEY(ctx.chat.id), []);
+    if (list.length >= 20) {
+      await ctx.reply("Too many scheduled posts (20 max). Remove one with /unschedule.");
+      return;
+    }
+    list.push({ id: Date.now().toString(36), when, text: m[4].trim().slice(0, 3500), by: String(ctx.from.id) });
+    list.sort((a, b) => a.when.localeCompare(b.when));
+    await stateSet(SCHED_KEY(ctx.chat.id), list, 365 * 24 * 60 * 60);
+    await ctx.reply(`Scheduled for ${when}. /schedules shows the list.`);
+  });
+  bot.command("schedules", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
+    const list = await stateGet(SCHED_KEY(ctx.chat.id), []);
+    if (!list.length) {
+      await ctx.reply("No scheduled posts.");
+      return;
+    }
+    await ctx.reply("SCHEDULED POSTS\n\n" + list.map((x, i) => `${i + 1}. ${x.when}: ${x.text.slice(0, 80)}`).join("\n") + "\n\n/unschedule NUMBER removes one.");
+  });
+  bot.command("unschedule", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
+    const idx = parseInt((ctx.match || "").toString(), 10) - 1;
+    const list = await stateGet(SCHED_KEY(ctx.chat.id), []);
+    if (!(idx >= 0 && idx < list.length)) {
+      await ctx.reply("Usage: /unschedule NUMBER (see /schedules)");
+      return;
+    }
+    const [gone] = list.splice(idx, 1);
+    await stateSet(SCHED_KEY(ctx.chat.id), list, 365 * 24 * 60 * 60);
+    await ctx.reply(`Removed the post set for ${gone.when}.`);
+  });
+  bot.command("holder", async (ctx) => {
+    if (!ctx.chat || !ctx.from || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
+    const target = ctx.message?.reply_to_message?.from;
+    if (!target || target.is_bot) {
+      await ctx.reply("Reply to the member's message with /holder once you've checked they hold a Boomerverse NFT.");
+      return;
+    }
+    const chatIdStr = String(ctx.chat.id), tid = String(target.id);
+    const record = await ensureTrustRecord(tid, chatIdStr, target.username, target.first_name);
+    await db.update(trustScores).set({
+      trustStatus: "vouched",
+      isTrusted: true,
+      trustLevel: Math.max(2, record?.trustLevel || 0),
+      isEligible: true,
+      vouchedBy: String(ctx.from.id),
+      vouchedAt: /* @__PURE__ */ new Date()
+    }).where(and(eq2(trustScores.telegramUserId, tid), eq2(trustScores.chatId, chatIdStr)));
+    const list = await stateGet(HOLDERS_KEY(ctx.chat.id), []);
+    if (!list.some((h) => h.id === tid)) list.push({ id: tid, name: target.username ? `@${target.username}` : target.first_name || tid });
+    await stateSet(HOLDERS_KEY(ctx.chat.id), list, 5 * 365 * 24 * 60 * 60);
+    await ctx.reply(`${target.username ? "@" + target.username : target.first_name} is now a verified Boomerverse HOLDER: trusted status, links allowed, pictures unscanned.`);
+  });
+  bot.command("unholder", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
+    const target = ctx.message?.reply_to_message?.from;
+    if (!target) {
+      await ctx.reply("Reply to the member's message with /unholder.");
+      return;
+    }
+    const list = (await stateGet(HOLDERS_KEY(ctx.chat.id), [])).filter((h) => h.id !== String(target.id));
+    await stateSet(HOLDERS_KEY(ctx.chat.id), list, 5 * 365 * 24 * 60 * 60);
+    await ctx.reply("Removed from the holder list. Their trust level is unchanged. Use /untrust to remove that too.");
+  });
+  bot.command("holders", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0) return;
+    const list = await stateGet(HOLDERS_KEY(ctx.chat.id), []);
+    await ctx.reply(list.length ? "VERIFIED HOLDERS\n\n" + list.map((h) => `\u2022 ${h.name}`).join("\n") : "No verified holders listed yet.");
+  });
+  bot.callbackQuery(/^appeal:(\d+)$/, async (ctx) => {
+    const uid = ctx.match[1];
+    const chatId = ctx.chat?.id;
+    if (!chatId || !ctx.from) return;
+    if (String(ctx.from.id) !== uid) {
+      await ctx.answerCallbackQuery({ text: "Only the muted member can ask for a review." });
+      return;
+    }
+    const key = `w:appeal:${chatId}:${uid}`;
+    if (await stateGet(key, false)) {
+      await ctx.answerCallbackQuery({ text: "Already sent. The admins will look when they can." });
+      return;
+    }
+    await stateSet(key, true, 24 * 60 * 60);
+    let mentions = "";
+    try {
+      const admins = await ctx.api.getChatAdministrators(chatId);
+      mentions = admins.filter((a) => !a.user.is_bot && a.user.username).slice(0, 3).map((a) => `@${a.user.username}`).join(" ");
+    } catch {
+    }
+    const who = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || "A member";
+    await ctx.api.sendMessage(chatId, `${mentions} ${who} says their mute was a mistake and asks for a review.`, {
+      reply_markup: { inline_keyboard: [[
+        { text: "Unmute", callback_data: `appr:ok:${uid}` },
+        { text: "Keep muted", callback_data: `appr:no:${uid}` }
+      ]] }
+    });
+    await ctx.answerCallbackQuery({ text: "Sent to the admins." });
+  });
+  bot.callbackQuery(/^appr:(ok|no):(\d+)$/, async (ctx) => {
+    const decision = ctx.match[1], uid = ctx.match[2];
+    const chatId = ctx.chat?.id;
+    if (!chatId || !ctx.from) return;
+    if (!(isGlobalOwner(ctx) || await isUserAdmin(ctx, ctx.from.id))) {
+      await ctx.answerCallbackQuery({ text: "Admins only." });
+      return;
+    }
+    const by = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || "an admin";
+    if (decision === "ok") {
+      await unmuteUser(ctx, Number(uid));
+      const off = await getUserOffenses(chatId, Number(uid));
+      off.count = Math.max(0, off.count - 1);
+      await stateSet(KEYS.offense(chatId, Number(uid)), off, TTL.offense);
+      await ctx.editMessageText(`Appeal approved by ${by}. Member unmuted and the offence removed.`).catch(() => {
+      });
+    } else {
+      await ctx.editMessageText(`Appeal reviewed by ${by}. The mute stays.`).catch(() => {
+      });
+    }
+    await ctx.answerCallbackQuery();
   });
   bot.command("trustset", async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
@@ -7889,6 +8179,14 @@ To get a group's chatId, use /communities first.`
         console.log("Couldn't delete suspicious caption edit:", e);
       }
     }
+  });
+  bot.on("message:new_chat_members", async (ctx, next) => {
+    for (const m of ctx.message.new_chat_members) {
+      if (!m.is_bot && staticRoleForUserId(m.id) === "member") {
+        await checkProfilePhotoClone(ctx, m);
+      }
+    }
+    await next();
   });
   bot.on("message:new_chat_members", async (ctx) => {
     for (const member of ctx.message.new_chat_members) {

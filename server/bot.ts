@@ -4255,7 +4255,8 @@ async function punishRestrictedContent(ctx: MyContext, messageId: number, text: 
     } else {
       await ctx.api.restrictChatMember(chat.id, from.id, { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
         { until_date: Math.floor(Date.now() / 1000) + muteSeconds });
-      await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). ${why}`);
+      await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). ${why}`,
+        { reply_markup: { inline_keyboard: [[{ text: "Think this is a mistake? Ask admins", callback_data: `appeal:${from.id}` }]] } });
     }
     await logViolation(String(chat.id), String(from.id), from.username || "", type, text.slice(0, 120), why, shouldBan ? "ban" : "mute");
     await incrementModStat(String(chat.id), "scamsBlocked");
@@ -4407,6 +4408,223 @@ async function scanPhotoForScam(ctx: MyContext): Promise<boolean> {
   }
 }
 
+
+// === COMMUNITY UPGRADES: freeze, schedule, events, appeals, photo-clone check ===
+const FREEZE_KEY = (chatId: string | number) => `w:freeze:${chatId}`;
+const SCHED_KEY = (chatId: string | number) => `w:sched:${chatId}`;
+const HOLDERS_KEY = (chatId: string | number) => `w:holders:${chatId}`;
+
+async function canRunAdminCmd(ctx: MyContext): Promise<boolean> {
+  if (!ctx.from || !ctx.chat) return false;
+  if (isGlobalOwner(ctx)) return true;
+  return ctx.chat.id < 0 && await isUserAdmin(ctx, ctx.from.id);
+}
+
+// Full freeze: nobody except admins can post, until /unlock. The group's earlier
+// permissions are saved first so /unlock puts everything back exactly as it was.
+async function freezeChat(api: MyContext["api"], chatId: number): Promise<void> {
+  let prev: Record<string, boolean> | null = null;
+  try { prev = ((await api.getChat(chatId)) as any).permissions || null; } catch {}
+  const existing = await stateGet<{ prev: Record<string, boolean> | null } | null>(FREEZE_KEY(chatId), null);
+  if (!existing) await stateSet(FREEZE_KEY(chatId), { prev, at: Date.now() }, 14 * 24 * 60 * 60);
+  await api.setChatPermissions(chatId, {
+    can_send_messages: false, can_send_audios: false, can_send_documents: false,
+    can_send_photos: false, can_send_videos: false, can_send_video_notes: false,
+    can_send_voice_notes: false, can_send_polls: false, can_send_other_messages: false,
+    can_add_web_page_previews: false,
+  });
+}
+
+async function unfreezeChat(api: MyContext["api"], chatId: number): Promise<boolean> {
+  const saved = await stateGet<{ prev: Record<string, boolean> | null } | null>(FREEZE_KEY(chatId), null);
+  if (!saved) return false;
+  const base = {
+    can_send_messages: true, can_send_audios: true, can_send_documents: true,
+    can_send_photos: true, can_send_videos: true, can_send_video_notes: true,
+    can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true,
+    can_add_web_page_previews: true,
+  };
+  await api.setChatPermissions(chatId, (saved.prev && Object.keys(saved.prev).length ? saved.prev : base) as any);
+  await stateDel(FREEZE_KEY(chatId));
+  return true;
+}
+
+// "YYYY-MM-DD HH:MM" in the community's own timezone.
+function localStamp(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: COMMUNITY_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date());
+  const g = (t: string) => parts.find(x => x.type === t)?.value || "00";
+  return `${g("year")}-${g("month")}-${g("day")} ${g("hour")}:${g("minute")}`;
+}
+
+interface ScheduledPost { id: string; when: string; text: string; by: string; }
+
+async function runScheduledPosts(bot: Bot<MyContext>): Promise<number> {
+  let sent = 0;
+  const now = localStamp();
+  for (const chatId of Array.from(activeChats)) {
+    const list = await stateGet<ScheduledPost[]>(SCHED_KEY(chatId), []);
+    const due = list.filter(x => x.when <= now);
+    if (!due.length) continue;
+    await stateSet(SCHED_KEY(chatId), list.filter(x => x.when > now), 365 * 24 * 60 * 60);
+    for (const post of due) {
+      try { await bot.api.sendMessage(chatId, post.text); sent++; }
+      catch (e) { console.log("Scheduled post failed:", e); }
+    }
+  }
+  return sent;
+}
+
+const SCAM_TIPS = [
+  "SCAM WATCH: The Boomerverse team will NEVER DM you first. If someone messages you offering help, a deal or support, it's a scammer. Block and report.",
+  "SCAM WATCH: There is no token. Any presale, airdrop, \"claim\" or whitelist link you see is fake. Don't connect your wallet to it.",
+  "SCAM WATCH: Nobody real ever needs your seed phrase or private key. Not admins, not support, not \"verification\". Never type it anywhere.",
+  "SCAM WATCH: Check the username before you trust a message. Scammers copy admin names and photos with one letter changed. Real admins have the badge in this group.",
+  "SCAM WATCH: Fake \"wallet connect\" and \"verify your wallet\" pages drain wallets in one click. Only use links from the pinned messages.",
+  "SCAM WATCH: \"Urgent\", \"last chance\" and \"only 10 spots left\" are pressure tricks. Real projects don't rush you. Slow down and ask here first.",
+];
+
+async function postWeeklyScamReminder(bot: Bot<MyContext>): Promise<void> {
+  const week = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000));
+  const tip = SCAM_TIPS[week % SCAM_TIPS.length];
+  for (const chatId of Array.from(activeChats)) {
+    try { await bot.api.sendMessage(chatId, tip); } catch {}
+  }
+}
+
+async function postGameNight(bot: Bot<MyContext>): Promise<void> {
+  const lines = [
+    "FRIDAY GAME NIGHT. Type games to open the arcade and post your best score here. Highest score by Sunday night gets a shout-out.",
+    "It's Friday. Arcade is open. Type games, pick one, and tell us your score. Rift Radio is on too: type radio.",
+    "Game night. Type games, beat a mate's score, and shout about it here. Type radio for some tunes while you play.",
+  ];
+  const text = lines[Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000)) % lines.length];
+  for (const chatId of Array.from(activeChats)) {
+    try { await bot.api.sendMessage(chatId, text); } catch {}
+  }
+}
+
+async function postWeeklyTrivia(bot: Bot<MyContext>): Promise<void> {
+  const topics = ["Australian animals", "endangered animals of the world", "Tasmania", "Australian geography", "ocean and reef life", "Australian history", "how blockchain and NFTs work in plain terms"];
+  const topic = topics[Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000)) % topics.length];
+  let q: { question: string; options: string[]; correct_index: number; explanation?: string } | null = null;
+  try {
+    const ai = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: `Write ONE fun multiple-choice trivia question for a friendly community about: ${topic}. It must have exactly one clearly correct answer you are certain of. Reply JSON only: {"question": "...", "options": ["a","b","c","d"], "correct_index": 0-3, "explanation": "one short sentence"}. Question under 250 characters, each option under 80, explanation under 150.` },
+      ],
+      max_tokens: 250,
+    });
+    q = JSON.parse(ai.choices[0]?.message?.content || "{}");
+  } catch (e) { console.log("Trivia generation failed:", e); }
+  if (!q || !q.question || !Array.isArray(q.options) || q.options.length !== 4 || !(q.correct_index >= 0 && q.correct_index <= 3)) return;
+  for (const chatId of Array.from(activeChats)) {
+    try {
+      await bot.api.sendPoll(chatId, q.question.slice(0, 290), q.options.map(o => String(o).slice(0, 95)), {
+        type: "quiz", correct_option_ids: [q.correct_index], is_anonymous: true,
+        explanation: (q.explanation || "").slice(0, 190) || undefined,
+      });
+    } catch (e) { console.log("Trivia post failed:", e); }
+  }
+}
+
+// Sunday shout-out: the most active member who kept clean all week.
+async function postMemberOfTheWeek(bot: Bot<MyContext>): Promise<void> {
+  const week = getWeekStartDate();
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  for (const chatId of Array.from(activeChats)) {
+    try {
+      const rows = await db.select().from(trustScores)
+        .where(and(eq(trustScores.chatId, String(chatId)), eq(trustScores.weeklyResetDate, week)))
+        .orderBy(desc(trustScores.weeklyMsgCount)).limit(10);
+      for (const r of rows) {
+        if ((r.weeklyMsgCount || 0) < 10) break;
+        try {
+          const m = await bot.api.getChatMember(chatId, Number(r.telegramUserId));
+          if (m.status === "administrator" || m.status === "creator" || m.status === "left" || m.status === "kicked") continue;
+        } catch { continue; }
+        const bad = await db.select({ n: sql<number>`count(*)::int` }).from(violationLogs)
+          .where(and(eq(violationLogs.chatId, String(chatId)), eq(violationLogs.userId, r.telegramUserId), gte(violationLogs.createdAt, since)));
+        if (Number(bad[0]?.n || 0) > 0) continue;
+        const who = r.username ? `@${r.username}` : (r.firstName || "a member");
+        await bot.api.sendMessage(chatId, `MEMBER OF THE WEEK: ${who}. Top contributor this week with a clean record. Thanks for making this a good place to hang out.`);
+        break;
+      }
+    } catch (e) { console.log("Member of the week failed:", e); }
+  }
+}
+
+// Download a Telegram image as a data URL for the vision model.
+async function telegramImageDataUrl(api: MyContext["api"], fileId: string): Promise<string | null> {
+  try {
+    const file = await api.getFile(fileId);
+    if (!file.file_path) return null;
+    const res = await fetch(`https://api.telegram.org/file/bot${api.token}/${file.file_path}`);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > 3 * 1024 * 1024) return null;
+    return `data:image/jpeg;base64,${buf.toString("base64")}`;
+  } catch { return null; }
+}
+
+async function profilePhotoFileId(api: MyContext["api"], userId: number): Promise<string | null> {
+  try {
+    const r = await api.getUserProfilePhotos(userId, { limit: 1 });
+    const sizes = r.photos?.[0];
+    if (!sizes || !sizes.length) return null;
+    return (sizes.find(x => x.width >= 160) || sizes[sizes.length - 1]).file_id;
+  } catch { return null; }
+}
+
+// Does a new member's profile picture copy an admin's? Fails open on any error.
+async function checkProfilePhotoClone(ctx: MyContext, member: { id: number; username?: string; first_name?: string; is_bot?: boolean }): Promise<void> {
+  if (member.is_bot || !ctx.chat || ctx.chat.id >= 0) return;
+  const chatId = ctx.chat.id;
+  try {
+    const { dateStr } = localParts();
+    const used = await stateIncr(`w:photoclone:${dateStr}`, 36 * 60 * 60);
+    if (used > 100) return;
+    const theirs = await profilePhotoFileId(ctx.api, member.id);
+    if (!theirs) return;
+    const admins = (await ctx.api.getChatAdministrators(chatId)).filter(a => !a.user.is_bot && a.user.id !== member.id).slice(0, 4);
+    const refs: { admin: typeof admins[number]; url: string }[] = [];
+    for (const a of admins) {
+      const id = await profilePhotoFileId(ctx.api, a.user.id);
+      const url = id ? await telegramImageDataUrl(ctx.api, id) : null;
+      if (url) refs.push({ admin: a, url });
+    }
+    if (!refs.length) return;
+    const newUrl = await telegramImageDataUrl(ctx.api, theirs);
+    if (!newUrl) return;
+    const content: any[] = [{ type: "text", text: "Image 1 is a new member's profile picture. Images 2 onward are admins' profile pictures. Is image 1 the same picture as any of the others (an identical or near-identical copy, same logo, same artwork or same photo)? Different people who merely look alike or share a style do NOT count. Reply JSON only: {\"match\": true or false, \"image\": number}." },
+      { type: "image_url", image_url: { url: newUrl, detail: "low" } }];
+    for (const r of refs) content.push({ type: "image_url", image_url: { url: r.url, detail: "low" } });
+    const ai = await Promise.race([
+      openai.chat.completions.create({ model: "gpt-4o-mini", response_format: { type: "json_object" }, messages: [{ role: "user", content }], max_tokens: 40 }),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 8000)),
+    ]);
+    if (!ai) return;
+    const v = JSON.parse(ai.choices[0]?.message?.content || "{}") as { match?: boolean; image?: number };
+    if (v.match !== true) return;
+    const hit = refs[(v.image || 2) - 2] || refs[0];
+    const who = member.username ? `@${member.username}` : (member.first_name || "A new member");
+    const target = hit.admin.user.username ? `@${hit.admin.user.username}` : (hit.admin.user.first_name || "an admin");
+    const { muteSeconds, shouldBan } = await addOffense(chatId, member.id, true);
+    if (shouldBan) await ctx.api.banChatMember(chatId, member.id);
+    else await ctx.api.restrictChatMember(chatId, member.id, { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false }, { until_date: Math.floor(Date.now() / 1000) + muteSeconds });
+    const mentions = admins.filter(a => a.user.username).slice(0, 3).map(a => `@${a.user.username}`).join(" ");
+    await ctx.api.sendMessage(chatId, `${mentions} IMPERSONATION ALERT: ${who} joined using a profile picture that copies ${target}. ${shouldBan ? "Removed." : `Muted for ${formatDuration(muteSeconds)}.`} Members: the real admins are the ones with the admin badge. The team never DMs first.`);
+    await logViolation(String(chatId), String(member.id), member.username || "", "impersonation_photo", member.username || "", `Profile picture copies ${target}`, shouldBan ? "ban" : "mute");
+    await incrementModStat(String(chatId), "scamsBlocked");
+  } catch (e) {
+    console.log("Profile photo check failed (allowed through):", e);
+  }
+}
+
 // === BOT SETUP ===
 export function createBot(): Bot<MyContext> {
   const bot = new Bot<MyContext>(BOT_TOKEN!);
@@ -4472,7 +4690,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -5342,12 +5560,15 @@ _I learn from what works. Use the +1/-1 buttons and I'll get better at this._`,
       const member = await ctx.api.getChatMember(chatId, ctx.from.id);
       const isAdmin = member.status === "administrator" || member.status === "creator";
       
-      if (!isAdmin) {
+      if (!isAdmin && !isGlobalOwner(ctx)) {
         await ctx.reply("Only admins can end lockdown mode.");
         return;
       }
       
-      if (await isInLockdown(chatIdStr)) {
+      const wasFrozen = await unfreezeChat(ctx.api, chatId).catch(() => false);
+      if (wasFrozen && !(await isInLockdown(chatIdStr))) {
+        await ctx.reply(`CHAT UNLOCKED. Everyone can post again. Unlocked by @${ctx.from.username || ctx.from.first_name}.`);
+      } else if (await isInLockdown(chatIdStr)) {
         await endLockdown(chatIdStr);
         await ctx.reply(
           `Lockdown Mode Ended\n\n` +
@@ -5375,20 +5596,20 @@ _I learn from what works. Use the +1/-1 buttons and I'll get better at this._`,
       const member = await ctx.api.getChatMember(chatId, ctx.from.id);
       const isAdmin = member.status === "administrator" || member.status === "creator";
       
-      if (!isAdmin) {
+      if (!isAdmin && !isGlobalOwner(ctx)) {
         await ctx.reply("Only admins can trigger lockdown mode.");
         return;
       }
       
-      if (await isInLockdown(chatIdStr)) {
-        await ctx.reply("Chat is already in lockdown mode. Use /unlock to end it.");
+      if (await stateGet<unknown>(FREEZE_KEY(chatId), null)) {
+        await ctx.reply("Chat is already frozen. Use /unlock to open it again.");
       } else {
         await stateSet(KEYS.lockdown(chatIdStr), { active: true, until: Date.now() + LOCKDOWN_DURATION }, TTL.lockdown);
+        await freezeChat(ctx.api, chatId);
         await ctx.reply(
-          `LOCKDOWN MODE ACTIVATED\n\n` +
-          `Triggered manually by @${ctx.from.username || ctx.from.first_name}.\n\n` +
-          `New users will be restricted for 5 minutes.\n` +
-          `Use /unlock to end early.`
+          `CHAT FROZEN\n\n` +
+          `Triggered by @${ctx.from.username || ctx.from.first_name}.\n\n` +
+          `Only admins can post until /unlock is used. New joiners are restricted too.`
         );
       }
     } catch (e) {
@@ -6617,6 +6838,140 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     } catch {
       await ctx.reply("Posted, but I couldn't pin it. Make me an admin with the Pin Messages right, then send /pinsafety again.");
     }
+  });
+
+
+  // === ADMIN TOOLS: mod log, scheduled posts, holders, appeals ===
+
+  // /log [n] - last actions the bot took (admins and owner; sent privately)
+  bot.command("log", async (ctx) => {
+    if (!ctx.chat || !ctx.from || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
+    const n = Math.min(40, Math.max(1, parseInt((ctx.match || "").toString(), 10) || 20));
+    const rows = await db.select().from(violationLogs)
+      .where(eq(violationLogs.chatId, String(ctx.chat.id))).orderBy(desc(violationLogs.createdAt)).limit(n);
+    if (!rows.length) { await ctx.reply("Nothing logged yet."); return; }
+    const lines = rows.map(r => {
+      const t = r.createdAt ? new Intl.DateTimeFormat("en-AU", { timeZone: COMMUNITY_TIMEZONE, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(r.createdAt)) : "?";
+      const why = (r.violatingContent || "").replace(/\s+/g, " ").slice(0, 70);
+      return `${t} | ${(r.actionTaken || "logged").toUpperCase()} | ${r.username ? "@" + r.username : r.userId} | ${r.violationType.replace(/_/g, " ")}${why ? " | " + why : ""}`;
+    });
+    try {
+      await ctx.api.sendMessage(ctx.from.id, `WARDEN LOG: last ${rows.length} actions in ${ctx.chat.title || "the group"}\n\n${lines.join("\n")}`);
+      await ctx.reply("Log sent to you privately.");
+    } catch {
+      await ctx.reply("I can't message you yet. Open a private chat with me, send /start, then try /log again.");
+    }
+  });
+
+  // /schedule YYYY-MM-DD HH:MM message  (community time)
+  bot.command("schedule", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
+    const m = (ctx.match || "").toString().trim().match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})\s+([\s\S]{3,})$/);
+    if (!m) {
+      await ctx.reply("Usage: /schedule 2026-11-01 18:30 Your message here\n(date as YYYY-MM-DD, 24-hour time, in the group's local time)");
+      return;
+    }
+    const when = `${m[1]} ${m[2].padStart(2, "0")}:${m[3]}`;
+    if (when <= localStamp()) { await ctx.reply("That time has already passed."); return; }
+    const list = await stateGet<ScheduledPost[]>(SCHED_KEY(ctx.chat.id), []);
+    if (list.length >= 20) { await ctx.reply("Too many scheduled posts (20 max). Remove one with /unschedule."); return; }
+    list.push({ id: Date.now().toString(36), when, text: m[4].trim().slice(0, 3500), by: String(ctx.from!.id) });
+    list.sort((a, b) => a.when.localeCompare(b.when));
+    await stateSet(SCHED_KEY(ctx.chat.id), list, 365 * 24 * 60 * 60);
+    await ctx.reply(`Scheduled for ${when}. /schedules shows the list.`);
+  });
+
+  bot.command("schedules", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
+    const list = await stateGet<ScheduledPost[]>(SCHED_KEY(ctx.chat.id), []);
+    if (!list.length) { await ctx.reply("No scheduled posts."); return; }
+    await ctx.reply("SCHEDULED POSTS\n\n" + list.map((x, i) => `${i + 1}. ${x.when}: ${x.text.slice(0, 80)}`).join("\n") + "\n\n/unschedule NUMBER removes one.");
+  });
+
+  bot.command("unschedule", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
+    const idx = parseInt((ctx.match || "").toString(), 10) - 1;
+    const list = await stateGet<ScheduledPost[]>(SCHED_KEY(ctx.chat.id), []);
+    if (!(idx >= 0 && idx < list.length)) { await ctx.reply("Usage: /unschedule NUMBER (see /schedules)"); return; }
+    const [gone] = list.splice(idx, 1);
+    await stateSet(SCHED_KEY(ctx.chat.id), list, 365 * 24 * 60 * 60);
+    await ctx.reply(`Removed the post set for ${gone.when}.`);
+  });
+
+  // /holder (reply) - admins mark a member as a verified Boomerverse holder
+  bot.command("holder", async (ctx) => {
+    if (!ctx.chat || !ctx.from || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
+    const target = ctx.message?.reply_to_message?.from;
+    if (!target || target.is_bot) { await ctx.reply("Reply to the member's message with /holder once you've checked they hold a Boomerverse NFT."); return; }
+    const chatIdStr = String(ctx.chat.id), tid = String(target.id);
+    const record = await ensureTrustRecord(tid, chatIdStr, target.username, target.first_name);
+    await db.update(trustScores).set({
+      trustStatus: "vouched", isTrusted: true, trustLevel: Math.max(2, record?.trustLevel || 0),
+      isEligible: true, vouchedBy: String(ctx.from.id), vouchedAt: new Date(),
+    }).where(and(eq(trustScores.telegramUserId, tid), eq(trustScores.chatId, chatIdStr)));
+    const list = await stateGet<{ id: string; name: string }[]>(HOLDERS_KEY(ctx.chat.id), []);
+    if (!list.some(h => h.id === tid)) list.push({ id: tid, name: target.username ? `@${target.username}` : (target.first_name || tid) });
+    await stateSet(HOLDERS_KEY(ctx.chat.id), list, 5 * 365 * 24 * 60 * 60);
+    await ctx.reply(`${target.username ? "@" + target.username : target.first_name} is now a verified Boomerverse HOLDER: trusted status, links allowed, pictures unscanned.`);
+  });
+
+  bot.command("unholder", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
+    const target = ctx.message?.reply_to_message?.from;
+    if (!target) { await ctx.reply("Reply to the member's message with /unholder."); return; }
+    const list = (await stateGet<{ id: string; name: string }[]>(HOLDERS_KEY(ctx.chat.id), [])).filter(h => h.id !== String(target.id));
+    await stateSet(HOLDERS_KEY(ctx.chat.id), list, 5 * 365 * 24 * 60 * 60);
+    await ctx.reply("Removed from the holder list. Their trust level is unchanged. Use /untrust to remove that too.");
+  });
+
+  bot.command("holders", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0) return;
+    const list = await stateGet<{ id: string; name: string }[]>(HOLDERS_KEY(ctx.chat.id), []);
+    await ctx.reply(list.length ? "VERIFIED HOLDERS\n\n" + list.map(h => `• ${h.name}`).join("\n") : "No verified holders listed yet.");
+  });
+
+  // Appeals: a muted member can ask the admins to look again.
+  bot.callbackQuery(/^appeal:(\d+)$/, async (ctx) => {
+    const uid = ctx.match![1];
+    const chatId = ctx.chat?.id;
+    if (!chatId || !ctx.from) return;
+    if (String(ctx.from.id) !== uid) { await ctx.answerCallbackQuery({ text: "Only the muted member can ask for a review." }); return; }
+    const key = `w:appeal:${chatId}:${uid}`;
+    if (await stateGet<boolean>(key, false)) { await ctx.answerCallbackQuery({ text: "Already sent. The admins will look when they can." }); return; }
+    await stateSet(key, true, 24 * 60 * 60);
+    let mentions = "";
+    try {
+      const admins = await ctx.api.getChatAdministrators(chatId);
+      mentions = admins.filter(a => !a.user.is_bot && a.user.username).slice(0, 3).map(a => `@${a.user.username}`).join(" ");
+    } catch {}
+    const who = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "A member");
+    await ctx.api.sendMessage(chatId, `${mentions} ${who} says their mute was a mistake and asks for a review.`, {
+      reply_markup: { inline_keyboard: [[
+        { text: "Unmute", callback_data: `appr:ok:${uid}` },
+        { text: "Keep muted", callback_data: `appr:no:${uid}` },
+      ]] },
+    });
+    await ctx.answerCallbackQuery({ text: "Sent to the admins." });
+  });
+
+  bot.callbackQuery(/^appr:(ok|no):(\d+)$/, async (ctx) => {
+    const decision = ctx.match![1], uid = ctx.match![2];
+    const chatId = ctx.chat?.id;
+    if (!chatId || !ctx.from) return;
+    if (!(isGlobalOwner(ctx as unknown as MyContext) || await isUserAdmin(ctx as unknown as MyContext, ctx.from.id))) {
+      await ctx.answerCallbackQuery({ text: "Admins only." }); return;
+    }
+    const by = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "an admin");
+    if (decision === "ok") {
+      await unmuteUser(ctx as unknown as MyContext, Number(uid));
+      const off = await getUserOffenses(chatId, Number(uid));
+      off.count = Math.max(0, off.count - 1);
+      await stateSet(KEYS.offense(chatId, Number(uid)), off, TTL.offense);
+      await ctx.editMessageText(`Appeal approved by ${by}. Member unmuted and the offence removed.`).catch(() => {});
+    } else {
+      await ctx.editMessageText(`Appeal reviewed by ${by}. The mute stays.`).catch(() => {});
+    }
+    await ctx.answerCallbackQuery();
   });
 
   // === TRUST MANAGEMENT (Owner + @TreeFitty Only) ===
@@ -8111,6 +8466,15 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
   });
 
   // === NEW MEMBER HANDLER ===
+  bot.on("message:new_chat_members", async (ctx, next) => {
+    for (const m of ctx.message.new_chat_members) {
+      if (!m.is_bot && staticRoleForUserId(m.id) === "member") {
+        await checkProfilePhotoClone(ctx, m);
+      }
+    }
+    await next();
+  });
+
   bot.on("message:new_chat_members", async (ctx) => {
     for (const member of ctx.message.new_chat_members) {
       const name = member.first_name || "friend";
@@ -11408,7 +11772,14 @@ export async function runCronTick(): Promise<{ ran: string[] }> {
     } catch (err) { console.error("[cron] game expiry failed:", err); }
   }
 
+  try { const n = await runScheduledPosts(bot); if (n) ran.push(`scheduled-posts:${n}`); }
+  catch (err) { console.error("[cron] scheduled posts failed:", err); }
+
   const { weekday } = localParts();
+  if (weekday === "Mon") await onceDaily("scam-reminder", 10, async () => { await postWeeklyScamReminder(bot); ran.push("scam-reminder"); });
+  if (weekday === "Wed") await onceDaily("trivia", 18, async () => { await postWeeklyTrivia(bot); ran.push("trivia"); });
+  if (weekday === "Fri") await onceDaily("game-night", 18, async () => { await postGameNight(bot); ran.push("game-night"); });
+  if (weekday === "Sun") await onceDaily("member-of-week", 19, async () => { await postMemberOfTheWeek(bot); ran.push("member-of-week"); });
   if (weekday === "Sun") {
     await onceDaily("winners-weekly", 20, async () => { await announceWinners("weekly"); ran.push("winners-weekly"); });
   }
