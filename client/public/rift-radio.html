@@ -187,8 +187,16 @@ const buzz = (s='light') => tg?.HapticFeedback?.impactOccurred?.(s);
 //            in the public radio directory instead. Belt and braces.
 //
 const STATIONS = [
+  { name:"Field Notes", real:"ABC Radio National",
+    desc:"Talk, documentary and ideas. Carries the wildlife and environment programmes.",
+    url:"https://abc.streamguys1.com/live/rnnsw/icecast.audio", lookup:"ABC Radio National" },
+
+  { name:"The Archive", real:"WALM Old Time Radio",
+    desc:"1940s and 50s serials. Sci-fi, mystery, the unexplained.",
+    url:"https://icecast.walmradio.com:8443/otr", lookup:"Old Time Radio" },
+
   { name:"Gateway Control", real:"SomaFM Mission Control",
-    desc:"Air-to-ground chatter over ambient. Real transmissions, long silences.",
+    desc:"Real NASA flight-control chatter and space-age ambient. Long silences, then a voice from orbit.",
     url:"https://ice1.somafm.com/missioncontrol-128-mp3", lookup:"Mission Control" },
 
   { name:"The Far Side", real:"SomaFM Deep Space One",
@@ -207,21 +215,13 @@ const STATIONS = [
     desc:"Slowed, half-remembered, faintly wrong.",
     url:"https://ice1.somafm.com/vaporwaves-128-mp3", lookup:"Vaporwaves" },
 
-  { name:"The Archive", real:"Old Time Radio",
-    desc:"1940s and 50s serials. Sci-fi, mystery, the unexplained.",
-    url:"", lookup:"Old Time Radio" },
-
   { name:"Bush Frequency", real:"ABC Triple J",
     desc:"New Australian music.",
-    url:"", lookup:"Triple J" },
+    url:"https://abc.streamguys1.com/live/triplejnsw/icecast.audio", lookup:"Triple J" },
 
-  { name:"Field Notes", real:"ABC Radio National",
-    desc:"Talk, documentary and ideas. Carries the wildlife and environment programmes.",
-    url:"", lookup:"ABC Radio National" },
-
-  { name:"Dawn Chorus", real:"24/7 Birdsong Radio",
+  { name:"Dawn Chorus", real:"Birdsong Radio",
     desc:"Birdsong, day and night. Recorded, not synthesised.",
-    url:"", lookup:"24/7 Birdsong Radio" },
+    url:"https://a1.radio.co/s5c5da6a36/listen", lookup:"Birdsong Radio" },
 ];
 
 // ── Dial ────────────────────────────────────────────────────────────────────
@@ -459,14 +459,14 @@ window.addEventListener('resize', sizeWave);
 // Each channel gets its own character — slower and flatter for the ambient
 // ones, busier for music and talk. Index matches STATIONS.
 const CHARACTER = [
+  { speed:.021, layers:3, chop:.55 },  // Field Notes — speech
+  { speed:.020, layers:3, chop:.55 },  // The Archive — speech
   { speed:.010, layers:2, chop:.15 },  // Gateway Control — long silences
   { speed:.008, layers:2, chop:.10 },  // The Far Side
   { speed:.006, layers:2, chop:.06 },  // The Long Quiet — slowest
   { speed:.013, layers:3, chop:.30 },  // Nightfall
   { speed:.018, layers:3, chop:.35 },  // Static Memory
-  { speed:.020, layers:3, chop:.55 },  // The Archive — speech
   { speed:.026, layers:4, chop:.60 },  // Bush Frequency — music
-  { speed:.021, layers:3, chop:.55 },  // Field Notes — speech
   { speed:.014, layers:4, chop:.45 },  // Dawn Chorus — birds, spiky
 ];
 
