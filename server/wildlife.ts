@@ -171,3 +171,57 @@ export async function pickWildlifePost(): Promise<WildlifePost | null> {
   }
   return null;
 }
+
+// Owner request: build the same style of post for a species they name,
+// e.g. "tasmanian devil". Works for any Australian species, listed as
+// threatened or not.
+export async function pickWildlifeByName(query: string): Promise<WildlifePost | null> {
+  const q = query.trim().slice(0, 80);
+  if (!q) return null;
+  const found = await getJson(
+    `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(q)}&rank=species&is_active=true&preferred_place_id=${AUSTRALIA_PLACE_ID}&locale=en&per_page=8`
+  );
+  const candidates: any[] = found?.results || [];
+  for (const c of candidates.slice(0, 6)) {
+    // Must actually occur in Australia.
+    const here = await getJson(
+      `https://api.inaturalist.org/v1/observations/species_counts?place_id=${AUSTRALIA_PLACE_ID}&taxon_id=${c.id}&per_page=1`
+    );
+    if (!here?.total_results) continue;
+    const full = (await getJson(`https://api.inaturalist.org/v1/taxa/${c.id}?preferred_place_id=${AUSTRALIA_PLACE_ID}&locale=en`))?.results?.[0] || c;
+    const name: string = full.preferred_common_name || full.name;
+    if (!full.wikipedia_url) continue;
+
+    // Best free-to-share photo: the main one if licensed, else the first licensed one.
+    let photo = full.default_photo && OK_LICENCES.has(String(full.default_photo.license_code || "").toLowerCase()) ? full.default_photo : null;
+    if (!photo) {
+      for (const tp of full.taxon_photos || []) {
+        const p = tp.photo;
+        if (p && OK_LICENCES.has(String(p.license_code || "").toLowerCase())) { photo = p; break; }
+      }
+    }
+    if (!photo) continue;
+    const photoUrl: string = photo.large_url || String(photo.medium_url || photo.url || "").replace(/\/(medium|square|small)\./, "/large.");
+    if (!photoUrl || !(await photoLooksSafe(photoUrl))) continue;
+
+    const title = decodeURIComponent(String(full.wikipedia_url).split("/wiki/")[1] || "");
+    const wiki = title ? await getJson(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`) : null;
+    const extract: string = wiki?.extract || "";
+    if (extract.length < 250) continue;
+
+    const cs = full.conservation_status;
+    const listed = !(cs?.place && cs.place.id !== AUSTRALIA_PLACE_ID) ? statusName(cs) : null;
+    const status = listed || "Not currently listed as threatened";
+    const authority = listed ? String(cs?.authority || "").trim() : "";
+    const body = await condense(name, full.name, status, extract);
+    if (!body) continue;
+
+    const credit = String(photo.attribution || "Photo: iNaturalist contributor").replace(/\s+/g, " ").slice(0, 140);
+    const caption =
+      `${name.toUpperCase()}\n${full.name}\nStatus: ${status}${authority ? ` (${authority})` : ""}\n\n${body}\n\n` +
+      `Help: back local conservation groups and log sightings on the Atlas of Living Australia.\n\n` +
+      `${credit}. Photo via iNaturalist. Facts from Wikipedia.`;
+    return { taxonId: full.id, commonName: name, scientificName: full.name, status, photoUrl, credit, caption: caption.slice(0, 1020), group: full.iconic_taxon_name || "" };
+  }
+  return null;
+}

@@ -12,7 +12,7 @@ import {
   isSuspiciousBotName, detectAdminCompromise, hasHomoglyphs,
 } from "./nftSecurity";
 import { assessBehaviour, checkCoordinatedPosting } from "./behaviour";
-import { pickWildlifePost, markWildlifeSeen } from "./wildlife";
+import { pickWildlifePost, pickWildlifeByName, markWildlifeSeen } from "./wildlife";
 import * as StoryBible from "./riftLore";
 
 // === BOT TOKEN ===
@@ -4628,8 +4628,8 @@ async function checkProfilePhotoClone(ctx: MyContext, member: { id: number; user
 
 
 // === WILDLIFE POSTS ===
-async function postWildlife(api: MyContext["api"], chatId: number): Promise<boolean> {
-  const post = await pickWildlifePost();
+async function postWildlife(api: MyContext["api"], chatId: number, named?: string): Promise<boolean> {
+  const post = named ? await pickWildlifeByName(named) : await pickWildlifePost();
   if (!post) return false;
   try {
     await api.sendPhoto(chatId, post.photoUrl, { caption: post.caption });
@@ -4640,7 +4640,7 @@ async function postWildlife(api: MyContext["api"], chatId: number): Promise<bool
       await api.sendPhoto(chatId, new InputFile(Buffer.from(await res.arrayBuffer()), "wildlife.jpg"), { caption: post.caption });
     } catch (e) { console.log("Wildlife photo send failed:", e); return false; }
   }
-  await markWildlifeSeen(post.taxonId);
+  if (!named) await markWildlifeSeen(post.taxonId);
   return true;
 }
 const WILDLIFE_CFG = (chatId: string | number) => `w:wildlife:cfg:${chatId}`;
@@ -6864,8 +6864,13 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
   // /wildlife - post a threatened Australian species now (admins/owner)
   bot.command("wildlife", async (ctx) => {
     if (!ctx.chat || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
-    const ok = await postWildlife(ctx.api, ctx.chat.id);
-    if (!ok) await ctx.reply("Couldn't find a good wildlife post just now. Try again in a minute.");
+    const named = (ctx.match || "").toString().trim();
+    // Naming a species is an owner-only extra: /wildlife tasmanian devil
+    if (named && !isGlobalOwner(ctx)) { await ctx.reply("Only the owner can pick a species. Admins can use /wildlife on its own for a random one."); return; }
+    const ok = await postWildlife(ctx.api, ctx.chat.id, named || undefined);
+    if (!ok) await ctx.reply(named
+      ? `I couldn't build a post for "${named}". It may not be found in Australia, or has no free-to-share photo. Try the common or scientific name.`
+      : "Couldn't find a good wildlife post just now. Try again in a minute.");
   });
 
   // /wildlifeauto daily | twice | off
