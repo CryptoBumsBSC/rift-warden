@@ -1989,11 +1989,11 @@ function getWardenRudenessContext(status: RudenessStatus, isCurrentlyRude: boole
   
   if (isCurrentlyRude) {
     if (status.rudeStrikes >= 5) {
-      return `This user has been rude ${status.rudeStrikes} times. Reply once, dryly, and close the exchange. Do not insult them, do not escalate, do not try to win. State the position and stop.`;
+      return `This user has been rude ${status.rudeStrikes} times. Fire back with one sharp, sassy, funny line aimed at what they said (never their looks, family, identity or background), then stop. No slurs, no threats, no second round.`;
     } else if (status.rudeStrikes >= 2) {
-      return `This user has been rude ${status.rudeStrikes} times. Answer the question plainly and add one dry line making clear the tone is noted. Do not match their tone.`;
+      return `This user has been rude ${status.rudeStrikes} times. Answer if there is a real question, and add one cheeky, sassy comeback aimed at their remark (never at them as a person). Keep it light and funny, no slurs.`;
     } else {
-      return `This user was just rude. Give a gentle The Warden pushback - let them know we prefer manners around here, but still be helpful.`;
+      return `This user was just rude. Give a playful, sassy The Warden comeback in one line. Cheeky and Australian, aimed at the remark, never cruel, then be helpful if there is a question.`;
     }
   } else if (status.wasNiceAfterRude) {
     return `This user was rude before but is being nice now! Acknowledge their improvement - say something like "Oh, NOW we're being polite!" or "See? That wasn't so hard!" Be warm but let them know you noticed the change.`;
@@ -2676,7 +2676,7 @@ async function generateRebuke(targetName: string, context: string): Promise<stri
       messages: [
         {
           role: "system",
-          content: `You are The Warden. Someone is being repeatedly rude in the chat. Write ONE short, dry, final line that closes the exchange. No insults, no name-calling, no jokes, no escalation, no threats. You are ending it, not winning it. One sentence.`
+          content: `You are The Warden. Someone is being repeatedly rude in the chat. Write ONE short, sassy, witty final line that wins the exchange with style. Roast the remark, never the person: no attacks on looks, family, identity, background or health, no slurs, no threats, no swearing. One sentence.`
         },
         { role: "user", content: `Close down the exchange with ${targetName}. Context: ${context}` }
       ],

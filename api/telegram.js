@@ -3009,11 +3009,11 @@ function getWardenRudenessContext(status, isCurrentlyRude) {
   }
   if (isCurrentlyRude) {
     if (status.rudeStrikes >= 5) {
-      return `This user has been rude ${status.rudeStrikes} times. Reply once, dryly, and close the exchange. Do not insult them, do not escalate, do not try to win. State the position and stop.`;
+      return `This user has been rude ${status.rudeStrikes} times. Fire back with one sharp, sassy, funny line aimed at what they said (never their looks, family, identity or background), then stop. No slurs, no threats, no second round.`;
     } else if (status.rudeStrikes >= 2) {
-      return `This user has been rude ${status.rudeStrikes} times. Answer the question plainly and add one dry line making clear the tone is noted. Do not match their tone.`;
+      return `This user has been rude ${status.rudeStrikes} times. Answer if there is a real question, and add one cheeky, sassy comeback aimed at their remark (never at them as a person). Keep it light and funny, no slurs.`;
     } else {
-      return `This user was just rude. Give a gentle The Warden pushback - let them know we prefer manners around here, but still be helpful.`;
+      return `This user was just rude. Give a playful, sassy The Warden comeback in one line. Cheeky and Australian, aimed at the remark, never cruel, then be helpful if there is a question.`;
     }
   } else if (status.wasNiceAfterRude) {
     return `This user was rude before but is being nice now! Acknowledge their improvement - say something like "Oh, NOW we're being polite!" or "See? That wasn't so hard!" Be warm but let them know you noticed the change.`;
