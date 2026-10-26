@@ -4186,14 +4186,15 @@ If it is official, @aussieboomer or @TreeFitty can approve the source/configurat
 function memberLabel(user) {
   return user.username ? `@${user.username}` : user.first_name || "friend";
 }
+var WELCOME_SAFETY = "\n\nRead the pinned messages. The team will NEVER DM you first. There is no token. Never share your seed phrase.";
 function buildFirstWelcome(label, botName = "The Warden") {
   return `${label}, welcome through the Gateway. I'm ${botName} \u2014 part doorman, part record-keeper, part scammer's recurring administrative problem.
 
 Boomerverse is an Australian collectible universe built around wildlife, bush legend, relics and the Rift. Genesis is the first collection: 333 unique ERC-721 pieces on Base. The project is about original art, canon, community and long-term stewardship \u2014 not investment promises, and there is no ERC-20 token.
 
 Start here:
-\u2022 Read the pinned messages and official links.
-\u2022 Nobody from the project will DM you first.
+\u2022 Read the pinned messages and official links first.
+\u2022 The team will NEVER DM you first. Anyone who does is a scammer.
 \u2022 Never trust a mint, contract or wallet link just because somebody sounds confident.
 \u2022 /info gives the project overview.
 \u2022 /safety gives the wallet-safety rules.
@@ -7993,9 +7994,9 @@ Tap the button below to confirm you're a real person. You have 10 minutes \u2014
       if (isFirstCommunityJoin) {
         welcome = buildFirstWelcome(label, botName);
       } else if (communityData?.welcomeMessage) {
-        welcome = communityData.welcomeMessage.replace(/\{name\}/gi, label);
+        welcome = communityData.welcomeMessage.replace(/\{name\}/gi, label) + WELCOME_SAFETY;
       } else {
-        welcome = `${label}, welcome back. Gate remembers you. Ask me what changed, or tag @${BOT_USERNAME2} and carry on where you left off.`;
+        welcome = `${label}, welcome back. Gate remembers you. Ask me what changed, or tag @${BOT_USERNAME2} and carry on where you left off.${WELCOME_SAFETY}`;
       }
       await wardenReply(ctx, welcome);
     }
