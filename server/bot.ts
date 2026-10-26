@@ -4175,6 +4175,7 @@ async function holdHiddenLink(ctx: MyContext): Promise<boolean> {
   if (!msg || !from || !chat) return false;
   const found = findHiddenLink(msg as any);
   if (!found) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
   try {
     await ctx.api.deleteMessage(chat.id, msg.message_id);
     const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
@@ -7727,7 +7728,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     // new members; the hard signals (scam wording, seed phrases, drainers,
     // contract addresses) apply to established members too.
     const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
-    if (_editTrust === "full" || _editTrust === "trusted") return;
+    if (_editTrust === "full") return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
     
     // Retrieve original content from database (if tracked)
@@ -7761,7 +7762,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       shouldDelete = true;
       violationType = "edit_scam";
       actionTaken = "deleted";
-    } else if (hasUnapprovedLink(newText, ctx.editedMessage.entities as any)) {
+    } else if (_editTrust !== "trusted" && hasUnapprovedLink(newText, ctx.editedMessage.entities as any)) {
       shouldDelete = true;
       violationType = "edit_link";
       actionTaken = "deleted";
@@ -7824,7 +7825,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     // new members; the hard signals (scam wording, seed phrases, drainers,
     // contract addresses) apply to established members too.
     const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
-    if (_editTrust === "full" || _editTrust === "trusted") return;
+    if (_editTrust === "full") return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
     
     // Check caption for malicious content
@@ -7837,7 +7838,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     let shouldDelete = false;
     let violationType = "";
     
-    if ((isScam && flags.length >= 2) || hasUnapprovedLink(caption, (ctx.editedMessage as any).caption_entities) || hasWalletDrainer || hasContractAddress) {
+    if ((isScam && flags.length >= 2) || (_editTrust !== "trusted" && hasUnapprovedLink(caption, (ctx.editedMessage as any).caption_entities)) || hasWalletDrainer || hasContractAddress) {
       shouldDelete = true;
       violationType = "edit_caption";
     }
@@ -8654,7 +8655,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     }
     
     const communityTrust = await getCommunityTrustClass(String(userId), String(chatId));
-    if (communityTrust === "full" || communityTrust === "trusted") return false;
+    if (communityTrust === "full") return false;
 
     // Check if user is admin (admins bypass moderation)
     const userIsAdmin = await isUserAdmin(ctx, userId);
@@ -8932,10 +8933,12 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     const hasFullCommunityTrust = communityTrust === "full";
     const hasTrustedCommunityTrust = communityTrust === "trusted";
 
-    if (chatId && chatId < 0 && communityTrust !== "full" && communityTrust !== "trusted") {
+    // Security watches everyone except the owners and admins. Trusted members
+    // may post links and pictures, but are still checked for scams.
+    if (chatId && chatId < 0 && communityTrust !== "full") {
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
-      if (await holdLinkFromUntrusted(ctx)) return;
+      if (communityTrust !== "trusted" && await holdLinkFromUntrusted(ctx)) return;
     }
 
     // Update activity time and reset auto-engage timer
@@ -9096,7 +9099,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       // SPAM DETECTION - Auto-mute spammers with escalating punishment
       if (ctx.from?.id && !ctx.from.is_bot) {
         // Check if user is admin (admins are exempt from spam detection)
-        const userIsAdmin = hasFullCommunityTrust || hasTrustedCommunityTrust || await isAdmin(ctx);
+        const userIsAdmin = hasFullCommunityTrust || await isAdmin(ctx);
         const _spamFeats = await getFeatureSettings(String(chatId));
 
         // Mass-mention spam detection — 5+ @mentions in one message
@@ -9190,7 +9193,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       // Full trust bypasses member moderation. Trusted mods bypass ordinary restrictions,
       // but links/contracts are still zero-trust and checked first.
       if (hasTrustedCommunityTrust && await enforceTrustedLinkContractRules(ctx, text)) return;
-      const userIsAdminForMod = hasFullCommunityTrust || hasTrustedCommunityTrust || await isUserAdmin(ctx, ctx.from.id);
+      const userIsAdminForMod = hasFullCommunityTrust || await isUserAdmin(ctx, ctx.from.id);
       
       const _earlyMediaFeats = await getFeatureSettings(chatIdStr);
 
@@ -9208,7 +9211,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       //
       // Deleting a real admin's message is a small annoyance. Leaving a drainer
       // link up because the sender had a badge is not recoverable.
-      if (userIsAdminForMod && !hasFullCommunityTrust && !hasTrustedCommunityTrust) {
+      if (userIsAdminForMod && !hasFullCommunityTrust) {
         const compromise = detectAdminCompromise(text);
         if (compromise) {
           let deleted = false;
@@ -9733,7 +9736,7 @@ Tip: Never click shortened links in crypto groups - they're often phishing sites
     // Scam detection (existing - keep for backwards compatibility)
     const { isScam, flags } = detectScam(text, username);
 
-    if (isScam && !hasFullCommunityTrust && !hasTrustedCommunityTrust) {
+    if (isScam && !hasFullCommunityTrust) {
       const warningMessage = ctx.session.wardenMode
         ? wardenResponse(`SUSPICIOUS MESSAGE DETECTED!\n\nFlags:\n${flags.join("\n")}\n\nAdmins, please review!`)
         : `Suspicious message detected!\n\nFlags:\n${flags.join("\n")}\n\nAdmins, please review!`;

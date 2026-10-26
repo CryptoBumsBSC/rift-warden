@@ -4590,6 +4590,7 @@ async function holdHiddenLink(ctx) {
   if (!msg || !from || !chat) return false;
   const found = findHiddenLink(msg);
   if (!found) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
   try {
     await ctx.api.deleteMessage(chat.id, msg.message_id);
     const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
@@ -7670,7 +7671,7 @@ To get a group's chatId, use /communities first.`
     } catch {
     }
     const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
-    if (_editTrust === "full" || _editTrust === "trusted") return;
+    if (_editTrust === "full") return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
     const originalRecord = await getTrackedMessage(messageId, chatIdStr);
     const originalContent = originalRecord?.originalContent || void 0;
@@ -7688,7 +7689,7 @@ To get a group's chatId, use /communities first.`
       shouldDelete = true;
       violationType = "edit_scam";
       actionTaken = "deleted";
-    } else if (hasUnapprovedLink(newText, ctx.editedMessage.entities)) {
+    } else if (_editTrust !== "trusted" && hasUnapprovedLink(newText, ctx.editedMessage.entities)) {
       shouldDelete = true;
       violationType = "edit_link";
       actionTaken = "deleted";
@@ -7737,7 +7738,7 @@ To get a group's chatId, use /communities first.`
     } catch {
     }
     const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
-    if (_editTrust === "full" || _editTrust === "trusted") return;
+    if (_editTrust === "full") return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
     const lowerCaption = caption.toLowerCase();
     const { isScam, flags } = detectScam(caption, username);
@@ -7746,7 +7747,7 @@ To get a group's chatId, use /communities first.`
     const hasContractAddress = /0x[a-fA-F0-9]{40}/i.test(caption);
     let shouldDelete = false;
     let violationType = "";
-    if (isScam && flags.length >= 2 || hasUnapprovedLink(caption, ctx.editedMessage.caption_entities) || hasWalletDrainer || hasContractAddress) {
+    if (isScam && flags.length >= 2 || _editTrust !== "trusted" && hasUnapprovedLink(caption, ctx.editedMessage.caption_entities) || hasWalletDrainer || hasContractAddress) {
       shouldDelete = true;
       violationType = "edit_caption";
     }
@@ -8462,7 +8463,7 @@ Admins, please review!`,
       return false;
     }
     const communityTrust = await getCommunityTrustClass(String(userId), String(chatId));
-    if (communityTrust === "full" || communityTrust === "trusted") return false;
+    if (communityTrust === "full") return false;
     const userIsAdmin = await isUserAdmin(ctx, userId);
     if (userIsAdmin) {
       return false;
@@ -8714,10 +8715,10 @@ Admins, please review!`,
     const communityTrust = chatId && chatId < 0 && ctx.from?.id ? await getCommunityTrustClass(String(ctx.from.id), String(chatId)) : "normal";
     const hasFullCommunityTrust = communityTrust === "full";
     const hasTrustedCommunityTrust = communityTrust === "trusted";
-    if (chatId && chatId < 0 && communityTrust !== "full" && communityTrust !== "trusted") {
+    if (chatId && chatId < 0 && communityTrust !== "full") {
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
-      if (await holdLinkFromUntrusted(ctx)) return;
+      if (communityTrust !== "trusted" && await holdLinkFromUntrusted(ctx)) return;
     }
     ctx.session.lastActivityTime = Date.now();
     if (chatId && chatId < 0) {
@@ -8858,7 +8859,7 @@ Use /community to view config \xB7 /settings to adjust features \xB7 /toggle [fe
         return;
       }
       if (ctx.from?.id && !ctx.from.is_bot) {
-        const userIsAdmin = hasFullCommunityTrust || hasTrustedCommunityTrust || await isAdmin(ctx);
+        const userIsAdmin = hasFullCommunityTrust || await isAdmin(ctx);
         const _spamFeats = await getFeatureSettings(String(chatId));
         if (!userIsAdmin && _spamFeats.massMention) {
           const mentionEntities = ctx.message?.entities?.filter(
@@ -8939,9 +8940,9 @@ ${warningMessage}`);
       const gameCommands = ["/trivia", "/puzzle", "/guess", "/leaderboard", "/puzzleboard", "/answer"];
       const isGameCommand = gameCommands.some((cmd) => text2.toLowerCase().startsWith(cmd));
       if (hasTrustedCommunityTrust && await enforceTrustedLinkContractRules(ctx, text2)) return;
-      const userIsAdminForMod = hasFullCommunityTrust || hasTrustedCommunityTrust || await isUserAdmin(ctx, ctx.from.id);
+      const userIsAdminForMod = hasFullCommunityTrust || await isUserAdmin(ctx, ctx.from.id);
       const _earlyMediaFeats = await getFeatureSettings(chatIdStr);
-      if (userIsAdminForMod && !hasFullCommunityTrust && !hasTrustedCommunityTrust) {
+      if (userIsAdminForMod && !hasFullCommunityTrust) {
         const compromise = detectAdminCompromise(text2);
         if (compromise) {
           let deleted = false;
@@ -9420,7 +9421,7 @@ You can read messages but cannot post. Admins have been notified.`
       }
     }
     const { isScam, flags } = detectScam(text2, username);
-    if (isScam && !hasFullCommunityTrust && !hasTrustedCommunityTrust) {
+    if (isScam && !hasFullCommunityTrust) {
       const warningMessage = ctx.session.wardenMode ? wardenResponse(`SUSPICIOUS MESSAGE DETECTED!
 
 Flags:
