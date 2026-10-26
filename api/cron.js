@@ -1777,7 +1777,8 @@ var SCAM_PATTERNS = {
   phishing: ["connect wallet to claim", "click here to secure your", "share your seed phrase", "approve this transaction", "send 0.1 eth", "limited time offer"],
   hacker: ["problem with your telegram", "send me the activation", "send me the login", "send me the 2fa", "send me the otp", "security alert", "your device is infected", "telegram premium subscription", "run this code", "install remote access", "anydesk", "teamviewer"],
   marketing: ["marketing", "promotion", "advertising", "sponsor", "partnership"],
-  crypto: ["investment", "profit", "guaranteed", "double your", "airdrop"]
+  crypto: ["investment", "profit", "guaranteed", "double your", "airdrop"],
+  projectScam: ["presale", "pre-sale", "token launch", "token presale", "official token", "whitelist spot", "dm me for", "dm for whitelist", "dm me to", "pm me for", "free mint link", "claim your reward", "claim your nft", "claim your free", "revoke.cash", "support team will", "contact support", "contact our support", "official support", "verify your wallet", "validate your wallet", "wallet validation", "rectify your wallet", "resolve your wallet", "sync your wallet", "recover your wallet", "wallet recovery", "send eth to", "send usdt to", "send crypto to", "double your eth", "guaranteed returns", "guaranteed profit"]
 };
 var SUSPICIOUS_USERNAMES = ["xxx", "porn", "nsfw", "onlyfans", "sex"];
 var CRYPTO_ADDRESS_REGEX = /(0x[a-fA-F0-9]{40}|bc1[a-zA-HJ-NP-Z0-9]{25,39}|eth:|btc:)/i;
@@ -4525,7 +4526,8 @@ async function recheckNameImpersonation(ctx) {
     } else adminUsernames = cached.usernames;
     const display = `${from.first_name || ""}${from.last_name || ""}`.replace(/\s+/g, "");
     const hit = (from.username ? checkAdminImpersonation(from.username, adminUsernames) : null)?.isImpersonation ? checkAdminImpersonation(from.username, adminUsernames) : display.length >= 6 ? checkAdminImpersonation(display, adminUsernames) : null;
-    if (!hit || !hit.isImpersonation) return false;
+    const officialish = /\b(admin|administrator|support|official|moderator|helpdesk|boomerverse|warden)\b/i.test(`${from.first_name || ""} ${from.last_name || ""}`);
+    if ((!hit || !hit.isImpersonation) && !officialish) return false;
     const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
     try {
       await ctx.api.deleteMessage(chat.id, ctx.message.message_id);
@@ -4533,7 +4535,7 @@ async function recheckNameImpersonation(ctx) {
     }
     const who = from.username ? `@${from.username}` : from.first_name || "A member";
     const mentions = adminUsernames.slice(0, 3).map((u) => `@${u}`).join(", ");
-    const reason = `Name now resembles admin @${hit.similarTo}`;
+    const reason = hit && hit.isImpersonation ? `Name now resembles admin @${hit.similarTo}` : `Display name poses as official staff`;
     if (shouldBan) {
       await ctx.api.banChatMember(chat.id, from.id);
       await ctx.api.sendMessage(chat.id, `${mentions}
@@ -4556,6 +4558,52 @@ ${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). ${rea
     return true;
   } catch (e) {
     console.log("Name recheck failed:", e);
+    return false;
+  }
+}
+function findHiddenLink(msg) {
+  const text2 = msg.text || "";
+  for (const e of msg.entities || []) {
+    if (e.type !== "text_link" || !e.url) continue;
+    const shown = text2.substr(e.offset, e.length).trim().toLowerCase();
+    if (!/^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(\/\S*)?$/.test(shown)) continue;
+    try {
+      const host = (h) => h.replace(/^www\./, "");
+      const shownHost = host(new URL(/^https?:\/\//.test(shown) ? shown : `https://${shown}`).hostname);
+      const realHost = host(new URL(e.url).hostname.toLowerCase());
+      if (shownHost !== realHost) return `${shownHost} -> ${realHost}`;
+    } catch {
+    }
+  }
+  return null;
+}
+async function holdHiddenLink(ctx) {
+  const msg = ctx.message;
+  const from = ctx.from, chat = ctx.chat;
+  if (!msg || !from || !chat) return false;
+  const found = findHiddenLink(msg);
+  if (!found) return false;
+  try {
+    await ctx.api.deleteMessage(chat.id, msg.message_id);
+    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
+    const who = from.username ? `@${from.username}` : from.first_name || "A member";
+    if (shouldBan) {
+      await ctx.api.banChatMember(chat.id, from.id);
+      await ctx.api.sendMessage(chat.id, `${who} removed for a disguised link (${found}).`);
+    } else {
+      await ctx.api.restrictChatMember(
+        chat.id,
+        from.id,
+        { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
+        { until_date: Math.floor(Date.now() / 1e3) + muteSeconds }
+      );
+      await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). Disguised link: the text said one site, the link went to another. Everyone: check where a link goes before you tap it.`);
+    }
+    await logViolation(String(chat.id), String(from.id), from.username || "", "hidden_link", found, found, shouldBan ? "ban" : "mute");
+    await incrementModStat(String(chat.id), "scamsBlocked");
+    return true;
+  } catch (e) {
+    console.log("Hidden link hold failed:", e);
     return false;
   }
 }
@@ -8569,6 +8617,7 @@ Admins, please review!`,
     const hasTrustedCommunityTrust = communityTrust === "trusted";
     if (chatId && chatId < 0 && communityTrust !== "full" && communityTrust !== "trusted") {
       if (await recheckNameImpersonation(ctx)) return;
+      if (await holdHiddenLink(ctx)) return;
     }
     ctx.session.lastActivityTime = Date.now();
     if (chatId && chatId < 0) {
