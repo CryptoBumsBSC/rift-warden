@@ -98,6 +98,8 @@ async function condense(common: string, sci: string, status: string, extract: st
   } catch { return null; }
 }
 
+export const wildlifeDebug: Record<string, unknown> = {};
+
 export async function pickWildlifePost(): Promise<WildlifePost | null> {
   const seen = await recentlySeen();
   // Random page so the same popular species don't always come first.
@@ -106,33 +108,36 @@ export async function pickWildlifePost(): Promise<WildlifePost | null> {
     `https://api.inaturalist.org/v1/observations/species_counts?place_id=${AUSTRALIA_PLACE_ID}&threatened=true&rank=species&preferred_place_id=${AUSTRALIA_PLACE_ID}&locale=en&per_page=100&page=${page}`
   );
   const results: any[] = data?.results || [];
+  wildlifeDebug.fetched = results.length; wildlifeDebug.apiOk = !!data; wildlifeDebug.total = data?.total_results;
+  wildlifeDebug.sample = results.slice(0, 3).map((r: any) => ({ n: r.taxon?.name, cs: r.taxon?.conservation_status?.status, lic: r.taxon?.default_photo?.license_code, wiki: !!r.taxon?.wikipedia_url, common: r.taxon?.preferred_common_name }));
+  const why: Record<string, number> = {}; const bump = (k: string) => { why[k] = (why[k] || 0) + 1; wildlifeDebug.skipped = why; };
   // Shuffle
   for (let i = results.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [results[i], results[j]] = [results[j], results[i]]; }
 
   let tried = 0;
   for (const r of results) {
     const t = r.taxon;
-    if (!t || seen[String(t.id)]) continue;
+    if (!t || seen[String(t.id)]) { bump('seen'); continue; }
     const code = t.conservation_status?.status;
-    if (!STATUS_NAMES[code]) continue;
+    if (!STATUS_NAMES[code]) { bump('status'); continue; }
     const photo = t.default_photo;
-    if (!photo || !OK_LICENCES.has(String(photo.license_code || "").toLowerCase())) continue;
-    if (!t.wikipedia_url || !t.preferred_common_name) continue;
+    if (!photo || !OK_LICENCES.has(String(photo.license_code || "").toLowerCase())) { bump('licence'); continue; }
+    if (!t.wikipedia_url || !t.preferred_common_name) { bump('nowiki'); continue; }
     if (++tried > 10) break;
 
     const title = decodeURIComponent(String(t.wikipedia_url).split("/wiki/")[1] || "");
     if (!title) continue;
     const wiki = await getJson(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
     const extract: string = wiki?.extract || "";
-    if (extract.length < 250) continue;
+    if (extract.length < 250) { bump('shortwiki'); continue; }
 
     const photoUrl: string = photo.large_url || String(photo.medium_url || "").replace("/medium.", "/large.");
     if (!photoUrl) continue;
-    if (!(await photoLooksSafe(photoUrl))) continue;
+    if (!(await photoLooksSafe(photoUrl))) { bump('photocheck'); continue; }
 
     const status = STATUS_NAMES[code];
     const body = await condense(t.preferred_common_name, t.name, status, extract);
-    if (!body) continue;
+    if (!body) { bump('condense'); continue; }
 
     const credit = `${String(photo.attribution || "Photo: iNaturalist contributor").replace(/\s+/g, " ").slice(0, 120)} (${LICENCE_NAMES[String(photo.license_code).toLowerCase()]})`;
     const caption =
