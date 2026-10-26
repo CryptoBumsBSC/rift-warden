@@ -4266,22 +4266,26 @@ async function isAdmin(ctx) {
 }
 var MUTE_DURATIONS = [
   15 * 60,
-  // 15 minutes in seconds (1st offense)
+  // 15 minutes (1st offense)
   4 * 60 * 60,
-  // 4 hours in seconds (2nd offense)
-  72 * 60 * 60
-  // 72 hours in seconds (3rd offense)
-  // 4th offense = permanent ban (handled in addOffense)
+  // 4 hours (2nd offense)
+  24 * 60 * 60,
+  // 24 hours (3rd offense)
+  72 * 60 * 60,
+  // 3 days (4th offense)
+  7 * 24 * 60 * 60
+  // 7 days (5th offense); 6th offense = ban
+  // 6th offense = permanent ban (handled in addOffense)
 ];
 var leaderboardData = /* @__PURE__ */ new Map();
 async function getUserOffenses(chatId, userId) {
   return await stateGet(KEYS.offense(chatId, userId), { count: 0, lastOffense: 0, muteUntil: 0 });
 }
-async function addOffense(chatId, userId) {
+async function addOffense(chatId, userId, severe = false) {
   const offense = await getUserOffenses(chatId, userId);
   offense.count++;
   offense.lastOffense = Date.now();
-  if (offense.count >= 4) {
+  if (offense.count >= (severe ? 2 : 6)) {
     await stateSet(KEYS.offense(chatId, userId), offense, TTL.offense);
     return { muteSeconds: 0, offenseCount: offense.count, notifyAdmin: true, shouldBan: true };
   }
@@ -4432,7 +4436,7 @@ async function recheckNameImpersonation(ctx) {
     const hit = (from.username ? checkAdminImpersonation(from.username, adminUsernames) : null)?.isImpersonation ? checkAdminImpersonation(from.username, adminUsernames) : display.length >= 6 ? checkAdminImpersonation(display, adminUsernames) : null;
     const officialish = /\b(admin|administrator|support|official|moderator|helpdesk|boomerverse|warden)\b/i.test(`${from.first_name || ""} ${from.last_name || ""}`);
     if ((!hit || !hit.isImpersonation) && !officialish) return false;
-    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
+    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id, true);
     try {
       await ctx.api.deleteMessage(chat.id, ctx.message.message_id);
     } catch {
@@ -4490,7 +4494,7 @@ async function holdHiddenLink(ctx) {
   if (await isUserAdmin(ctx, from.id)) return false;
   try {
     await ctx.api.deleteMessage(chat.id, msg.message_id);
-    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
+    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id, true);
     const who = from.username ? `@${from.username}` : from.first_name || "A member";
     if (shouldBan) {
       await ctx.api.banChatMember(chat.id, from.id);
@@ -7906,7 +7910,7 @@ You'll be able to chat once lockdown ends.`
           }
           const impersonationCheck = checkAdminImpersonation(username, adminUsernames);
           if (impersonationCheck.isImpersonation) {
-            const { muteSeconds, offenseCount, shouldBan } = await addOffense(chatId, member.id);
+            const { muteSeconds, offenseCount, shouldBan } = await addOffense(chatId, member.id, true);
             const adminMentions = adminUsernames.slice(0, 3).map((u) => `@${u}`).join(", ");
             const reason = `Username similar to admin @${impersonationCheck.similarTo} (${Math.round(impersonationCheck.similarity * 100)}% match)`;
             if (shouldBan) {
@@ -9058,7 +9062,7 @@ Worth a look.`
                   username,
                   ctx.from.first_name,
                   chatIdStr,
-                  "Automated behaviour pattern \u2014 4th offence"
+                  "Automated behaviour pattern \u2014 repeated offences"
                 );
               }
             } else {

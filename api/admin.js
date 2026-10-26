@@ -752,12 +752,16 @@ numbers beyond the list above. If it is not listed, do not write a question abou
 var CONVERSATION_TTL_SECONDS = 20 * 60;
 var MUTE_DURATIONS = [
   15 * 60,
-  // 15 minutes in seconds (1st offense)
+  // 15 minutes (1st offense)
   4 * 60 * 60,
-  // 4 hours in seconds (2nd offense)
-  72 * 60 * 60
-  // 72 hours in seconds (3rd offense)
-  // 4th offense = permanent ban (handled in addOffense)
+  // 4 hours (2nd offense)
+  24 * 60 * 60,
+  // 24 hours (3rd offense)
+  72 * 60 * 60,
+  // 3 days (4th offense)
+  7 * 24 * 60 * 60
+  // 7 days (5th offense); 6th offense = ban
+  // 6th offense = permanent ban (handled in addOffense)
 ];
 
 // server/adminRoutes.ts

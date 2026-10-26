@@ -3709,10 +3709,12 @@ interface UserOffense {
 
 // Mute durations: 15 min, 4 hours, 72 hours
 const MUTE_DURATIONS = [
-  15 * 60,           // 15 minutes in seconds (1st offense)
-  4 * 60 * 60,       // 4 hours in seconds (2nd offense)
-  72 * 60 * 60       // 72 hours in seconds (3rd offense)
-  // 4th offense = permanent ban (handled in addOffense)
+  15 * 60,           // 15 minutes (1st offense)
+  4 * 60 * 60,       // 4 hours (2nd offense)
+  24 * 60 * 60,      // 24 hours (3rd offense)
+  72 * 60 * 60,      // 3 days (4th offense)
+  7 * 24 * 60 * 60   // 7 days (5th offense); 6th offense = ban
+  // 6th offense = permanent ban (handled in addOffense)
 ];
 
 // Spam tracking
@@ -3773,14 +3775,15 @@ async function getUserOffenses(chatId: number, userId: number): Promise<UserOffe
   return await stateGet<UserOffense>(KEYS.offense(chatId, userId), { count: 0, lastOffense: 0, muteUntil: 0 });
 }
 
-// Add offense and return mute duration (4th offense = ban)
-async function addOffense(chatId: number, userId: number): Promise<{ muteSeconds: number; offenseCount: number; notifyAdmin: boolean; shouldBan: boolean }> {
+// Add offense and return mute duration (6th offense = ban; severe ones 2nd)
+async function addOffense(chatId: number, userId: number, severe = false): Promise<{ muteSeconds: number; offenseCount: number; notifyAdmin: boolean; shouldBan: boolean }> {
   const offense = await getUserOffenses(chatId, userId);
   offense.count++;
   offense.lastOffense = Date.now();
   
-  // 4th offense = permanent ban
-  if (offense.count >= 4) {
+  // Mute first, ban last. Ordinary offences: 6th = ban. Severe ones (impersonation,
+  // disguised links), where a muted scammer could still DM members: 2nd = ban.
+  if (offense.count >= (severe ? 2 : 6)) {
     await stateSet(KEYS.offense(chatId, userId), offense, TTL.offense);
     return { muteSeconds: 0, offenseCount: offense.count, notifyAdmin: true, shouldBan: true };
   }
@@ -4127,7 +4130,7 @@ async function recheckNameImpersonation(ctx: MyContext): Promise<boolean> {
       .test(`${from.first_name || ""} ${from.last_name || ""}`);
     if ((!hit || !hit.isImpersonation) && !officialish) return false;
 
-    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
+    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id, true);
     try { await ctx.api.deleteMessage(chat.id, ctx.message!.message_id); } catch {}
     const who = from.username ? `@${from.username}` : (from.first_name || "A member");
     const mentions = adminUsernames.slice(0, 3).map(u => `@${u}`).join(", ");
@@ -4178,7 +4181,7 @@ async function holdHiddenLink(ctx: MyContext): Promise<boolean> {
   if (await isUserAdmin(ctx, from.id)) return false;
   try {
     await ctx.api.deleteMessage(chat.id, msg.message_id);
-    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
+    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id, true);
     const who = from.username ? `@${from.username}` : (from.first_name || "A member");
     if (shouldBan) {
       await ctx.api.banChatMember(chat.id, from.id);
@@ -8135,7 +8138,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
           
           if (impersonationCheck.isImpersonation) {
             // Add offense to mute system (progressive punishment)
-            const { muteSeconds, offenseCount, shouldBan } = await addOffense(chatId, member.id);
+            const { muteSeconds, offenseCount, shouldBan } = await addOffense(chatId, member.id, true);
             const adminMentions = adminUsernames.slice(0, 3).map(u => `@${u}`).join(", ");
             const reason = `Username similar to admin @${impersonationCheck.similarTo} (${Math.round(impersonationCheck.similarity * 100)}% match)`;
             
@@ -9446,7 +9449,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
               await ctx.api.banChatMember(chatId, ctx.from.id);
               if (feats.crossBan) {
                 await recordGlobalBan(userIdStr, username, ctx.from.first_name, chatIdStr,
-                  "Automated behaviour pattern — 4th offence");
+                  "Automated behaviour pattern — repeated offences");
               }
             } else {
               await muteUser(ctx, ctx.from.id, muteSeconds, "Automated behaviour pattern", username);
