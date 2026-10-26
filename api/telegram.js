@@ -4117,7 +4117,6 @@ async function getCommunityTrustClass(userId, chatId) {
     const rec = rows[0];
     if (!rec) return "normal";
     if (rec.trustStatus === "restricted" || rec.isFrozen) return "restricted";
-    if ((rec.trustScore || 0) >= 100 || (rec.trustLevel || 0) >= 3) return "full";
     if ((rec.trustScore || 0) >= 50 || (rec.trustLevel || 0) >= 2 || rec.isTrusted) return "trusted";
     const daysIn = rec.joinDate ? (Date.now() - new Date(rec.joinDate).getTime()) / 864e5 : 0;
     if (daysIn >= AUTO_TRUST_DAYS && (rec.meaningfulMsgCount || 0) >= AUTO_TRUST_MESSAGES) {

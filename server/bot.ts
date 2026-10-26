@@ -3544,7 +3544,8 @@ async function getCommunityTrustClass(userId: string, chatId: string): Promise<C
     const rec = rows[0];
     if (!rec) return "normal";
     if (rec.trustStatus === "restricted" || rec.isFrozen) return "restricted";
-    if ((rec.trustScore || 0) >= 100 || (rec.trustLevel || 0) >= 3) return "full";
+    // Full trust belongs to the two owners only (set by user ID above).
+    // Earned or vouched trust tops out at "trusted".
     if ((rec.trustScore || 0) >= 50 || (rec.trustLevel || 0) >= 2 || rec.isTrusted) return "trusted";
     // Auto-trust: 7+ days in the group, at least 5 real messages, no offences.
     const daysIn = rec.joinDate ? (Date.now() - new Date(rec.joinDate).getTime()) / 86400000 : 0;
