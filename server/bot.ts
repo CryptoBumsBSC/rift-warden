@@ -735,8 +735,9 @@ function checkAdminImpersonation(newUsername: string, adminUsernames: string[]):
     
     const normalizedAdmin = admin.toLowerCase().replace(/[_\-\.0-9]/g, '');
     
-    // Skip if they're exactly the same (could be the admin themselves)
-    if (normalizedNew === normalizedAdmin) continue;
+    // Skip only a true exact match (the admin themselves). A name that only
+    // matches after stripping _ - . and digits (TreeFitty_) is a lookalike.
+    if (newUsername.toLowerCase() === admin.toLowerCase()) continue;
     
     // Skip very short usernames
     if (normalizedAdmin.length < 3 || normalizedNew.length < 3) continue;
@@ -746,7 +747,7 @@ function checkAdminImpersonation(newUsername: string, adminUsernames: string[]):
     const similarity = 1 - (distance / maxLen);
     
     // High similarity (> 70%) and not exact match = suspicious
-    if (similarity > 0.7 && similarity < 1.0) {
+    if (similarity > 0.7) {
       return { isImpersonation: true, similarTo: admin, similarity };
     }
     
@@ -4077,6 +4078,60 @@ async function autoEngageIfQuiet(bot: Bot<MyContext>, chatId: number): Promise<b
     await stateSet(countKey, used + 1, 36 * 60 * 60);
     return true;
   } catch {
+    return false;
+  }
+}
+
+
+// Names can change after joining. Re-run the admin-lookalike check whenever a
+// member's username or display name differs from the last one we saw.
+async function recheckNameImpersonation(ctx: MyContext): Promise<boolean> {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot) return false;
+  const feats = await getFeatureSettings(String(chat.id));
+  if (!feats.impersonation) return false;
+
+  const sig = `${from.username || ""}|${from.first_name || ""}|${from.last_name || ""}`;
+  const key = `w:namesig:${chat.id}:${from.id}`;
+  if ((await stateGet<string>(key, "")) === sig) return false;
+  await stateSet(key, sig, 30 * 24 * 60 * 60);
+
+  try {
+    const member = await ctx.api.getChatMember(chat.id, from.id);
+    if (member.status === "administrator" || member.status === "creator") return false;
+    const cached = adminCache.get(String(chat.id));
+    let adminUsernames: string[];
+    if (!cached || Date.now() - cached.lastUpdated > ADMIN_CACHE_TTL) {
+      const admins = await ctx.api.getChatAdministrators(chat.id);
+      adminUsernames = admins.filter(a => !a.user.is_bot && a.user.username).map(a => a.user.username!);
+      adminCache.set(String(chat.id), { usernames: adminUsernames, lastUpdated: Date.now() });
+    } else adminUsernames = cached.usernames;
+
+    const display = `${from.first_name || ""}${from.last_name || ""}`.replace(/\s+/g, "");
+    const hit = (from.username ? checkAdminImpersonation(from.username, adminUsernames) : null)?.isImpersonation
+      ? checkAdminImpersonation(from.username!, adminUsernames)
+      : (display.length >= 6 ? checkAdminImpersonation(display, adminUsernames) : null);
+    if (!hit || !hit.isImpersonation) return false;
+
+    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
+    try { await ctx.api.deleteMessage(chat.id, ctx.message!.message_id); } catch {}
+    const who = from.username ? `@${from.username}` : (from.first_name || "A member");
+    const mentions = adminUsernames.slice(0, 3).map(u => `@${u}`).join(", ");
+    const reason = `Name now resembles admin @${hit.similarTo}`;
+    if (shouldBan) {
+      await ctx.api.banChatMember(chat.id, from.id);
+      await ctx.api.sendMessage(chat.id, `${mentions}\n\n${who} removed. ${reason}. Possible impersonator.`);
+      await logViolation(String(chat.id), String(from.id), from.username || "", "impersonation", sig, reason, "ban");
+    } else {
+      await ctx.api.restrictChatMember(chat.id, from.id, { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
+        { until_date: Math.floor(Date.now() / 1000) + muteSeconds });
+      await ctx.api.sendMessage(chat.id, `${mentions}\n\n${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). ${reason}. This could be a scammer.`);
+      await logViolation(String(chat.id), String(from.id), from.username || "", "impersonation", sig, reason, "mute");
+    }
+    await incrementModStat(String(chat.id), "scamsBlocked");
+    return true;
+  } catch (e) {
+    console.log("Name recheck failed:", e);
     return false;
   }
 }
@@ -7567,8 +7622,12 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     } catch { /* continue with check */ }
     
     // Check if user is new (< 24 hours or < 5 messages)
+    // Everyone except trusted members is checked. Links are only blocked for
+    // new members; the hard signals (scam wording, seed phrases, drainers,
+    // contract addresses) apply to established members too.
+    const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
+    if (_editTrust === "full" || _editTrust === "trusted") return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
-    if (!userIsNew) return;
     
     // Retrieve original content from database (if tracked)
     const originalRecord = await getTrackedMessage(messageId, chatIdStr);
@@ -7601,7 +7660,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       shouldDelete = true;
       violationType = "edit_scam";
       actionTaken = "deleted";
-    } else if (hasLink) {
+    } else if (hasLink && userIsNew) {
       shouldDelete = true;
       violationType = "edit_link";
       actionTaken = "deleted";
@@ -7627,7 +7686,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
         await incrementModStat(chatIdStr, 'scamsBlocked');
         
         await ctx.api.sendMessage(chatId, 
-          `Caught that edit! New members can't sneak scam content in by editing old messages.\n\n` +
+          `Caught that edit! Nobody sneaks scam content in by editing old messages.\n\n` +
           `@${username || ctx.editedMessage.from.first_name || "User"}, your edited message was removed. ` +
           `Nice try, but The Warden's watching.`
         );
@@ -7660,8 +7719,12 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     } catch { /* continue with check */ }
     
     // Check if user is new
+    // Everyone except trusted members is checked. Links are only blocked for
+    // new members; the hard signals (scam wording, seed phrases, drainers,
+    // contract addresses) apply to established members too.
+    const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
+    if (_editTrust === "full" || _editTrust === "trusted") return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
-    if (!userIsNew) return;
     
     // Check caption for malicious content
     const lowerCaption = caption.toLowerCase();
@@ -7673,7 +7736,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     let shouldDelete = false;
     let violationType = "";
     
-    if ((isScam && flags.length >= 2) || hasLink || hasWalletDrainer || hasContractAddress) {
+    if ((isScam && flags.length >= 2) || (hasLink && userIsNew) || hasWalletDrainer || hasContractAddress) {
       shouldDelete = true;
       violationType = "edit_caption";
     }
@@ -7684,7 +7747,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
         await logViolation(chatIdStr, userIdStr, username, violationType, undefined, caption, "deleted");
         await incrementModStat(chatIdStr, 'scamsBlocked');
         await ctx.api.sendMessage(chatId, 
-          `Caught that caption edit! New members can't sneak scam content in by editing captions.\n` +
+          `Caught that caption edit! Nobody sneaks scam content in by editing captions.\n` +
           `@${username || ctx.editedMessage.from.first_name || "User"}, nice try but The Warden's watching.`
         );
       } catch (e) {
@@ -8720,6 +8783,10 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       : "normal";
     const hasFullCommunityTrust = communityTrust === "full";
     const hasTrustedCommunityTrust = communityTrust === "trusted";
+
+    if (chatId && chatId < 0 && communityTrust !== "full" && communityTrust !== "trusted") {
+      if (await recheckNameImpersonation(ctx)) return;
+    }
 
     // Update activity time and reset auto-engage timer
     ctx.session.lastActivityTime = Date.now();

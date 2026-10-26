@@ -1867,12 +1867,12 @@ function checkAdminImpersonation(newUsername, adminUsernames) {
   for (const admin of adminUsernames) {
     if (!admin) continue;
     const normalizedAdmin = admin.toLowerCase().replace(/[_\-\.0-9]/g, "");
-    if (normalizedNew === normalizedAdmin) continue;
+    if (newUsername.toLowerCase() === admin.toLowerCase()) continue;
     if (normalizedAdmin.length < 3 || normalizedNew.length < 3) continue;
     const distance = levenshteinDistance(normalizedNew, normalizedAdmin);
     const maxLen = Math.max(normalizedNew.length, normalizedAdmin.length);
     const similarity = 1 - distance / maxLen;
-    if (similarity > 0.7 && similarity < 1) {
+    if (similarity > 0.7) {
       return { isImpersonation: true, similarTo: admin, similarity };
     }
     const commonSwaps = [
@@ -4400,6 +4400,61 @@ async function updateAdminActivity(chatId, userId, username, firstName) {
 }
 async function markChatActivity(chatId) {
   await stateSet(`w:lastmsg:${chatId}`, Date.now(), 7 * 24 * 60 * 60);
+}
+async function recheckNameImpersonation(ctx) {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot) return false;
+  const feats = await getFeatureSettings(String(chat.id));
+  if (!feats.impersonation) return false;
+  const sig = `${from.username || ""}|${from.first_name || ""}|${from.last_name || ""}`;
+  const key = `w:namesig:${chat.id}:${from.id}`;
+  if (await stateGet(key, "") === sig) return false;
+  await stateSet(key, sig, 30 * 24 * 60 * 60);
+  try {
+    const member = await ctx.api.getChatMember(chat.id, from.id);
+    if (member.status === "administrator" || member.status === "creator") return false;
+    const cached = adminCache.get(String(chat.id));
+    let adminUsernames;
+    if (!cached || Date.now() - cached.lastUpdated > ADMIN_CACHE_TTL) {
+      const admins = await ctx.api.getChatAdministrators(chat.id);
+      adminUsernames = admins.filter((a) => !a.user.is_bot && a.user.username).map((a) => a.user.username);
+      adminCache.set(String(chat.id), { usernames: adminUsernames, lastUpdated: Date.now() });
+    } else adminUsernames = cached.usernames;
+    const display = `${from.first_name || ""}${from.last_name || ""}`.replace(/\s+/g, "");
+    const hit = (from.username ? checkAdminImpersonation(from.username, adminUsernames) : null)?.isImpersonation ? checkAdminImpersonation(from.username, adminUsernames) : display.length >= 6 ? checkAdminImpersonation(display, adminUsernames) : null;
+    if (!hit || !hit.isImpersonation) return false;
+    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
+    try {
+      await ctx.api.deleteMessage(chat.id, ctx.message.message_id);
+    } catch {
+    }
+    const who = from.username ? `@${from.username}` : from.first_name || "A member";
+    const mentions = adminUsernames.slice(0, 3).map((u) => `@${u}`).join(", ");
+    const reason = `Name now resembles admin @${hit.similarTo}`;
+    if (shouldBan) {
+      await ctx.api.banChatMember(chat.id, from.id);
+      await ctx.api.sendMessage(chat.id, `${mentions}
+
+${who} removed. ${reason}. Possible impersonator.`);
+      await logViolation(String(chat.id), String(from.id), from.username || "", "impersonation", sig, reason, "ban");
+    } else {
+      await ctx.api.restrictChatMember(
+        chat.id,
+        from.id,
+        { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
+        { until_date: Math.floor(Date.now() / 1e3) + muteSeconds }
+      );
+      await ctx.api.sendMessage(chat.id, `${mentions}
+
+${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). ${reason}. This could be a scammer.`);
+      await logViolation(String(chat.id), String(from.id), from.username || "", "impersonation", sig, reason, "mute");
+    }
+    await incrementModStat(String(chat.id), "scamsBlocked");
+    return true;
+  } catch (e) {
+    console.log("Name recheck failed:", e);
+    return false;
+  }
 }
 function createBot() {
   const bot = new Bot(BOT_TOKEN);
@@ -7418,8 +7473,9 @@ To get a group's chatId, use /communities first.`
       if (member.status === "administrator" || member.status === "creator") return;
     } catch {
     }
+    const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
+    if (_editTrust === "full" || _editTrust === "trusted") return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
-    if (!userIsNew) return;
     const originalRecord = await getTrackedMessage(messageId, chatIdStr);
     const originalContent = originalRecord?.originalContent || void 0;
     const lowerText = newText.toLowerCase();
@@ -7436,7 +7492,7 @@ To get a group's chatId, use /communities first.`
       shouldDelete = true;
       violationType = "edit_scam";
       actionTaken = "deleted";
-    } else if (hasLink) {
+    } else if (hasLink && userIsNew) {
       shouldDelete = true;
       violationType = "edit_link";
       actionTaken = "deleted";
@@ -7460,7 +7516,7 @@ To get a group's chatId, use /communities first.`
         await incrementModStat(chatIdStr, "scamsBlocked");
         await ctx.api.sendMessage(
           chatId,
-          `Caught that edit! New members can't sneak scam content in by editing old messages.
+          `Caught that edit! Nobody sneaks scam content in by editing old messages.
 
 @${username || ctx.editedMessage.from.first_name || "User"}, your edited message was removed. Nice try, but The Warden's watching.`
         );
@@ -7484,8 +7540,9 @@ To get a group's chatId, use /communities first.`
       if (member.status === "administrator" || member.status === "creator") return;
     } catch {
     }
+    const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
+    if (_editTrust === "full" || _editTrust === "trusted") return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
-    if (!userIsNew) return;
     const lowerCaption = caption.toLowerCase();
     const { isScam, flags } = detectScam(caption, username);
     const hasLink = /https?:\/\/|t\.me\/|@\w+/i.test(caption);
@@ -7493,7 +7550,7 @@ To get a group's chatId, use /communities first.`
     const hasContractAddress = /0x[a-fA-F0-9]{40}/i.test(caption);
     let shouldDelete = false;
     let violationType = "";
-    if (isScam && flags.length >= 2 || hasLink || hasWalletDrainer || hasContractAddress) {
+    if (isScam && flags.length >= 2 || hasLink && userIsNew || hasWalletDrainer || hasContractAddress) {
       shouldDelete = true;
       violationType = "edit_caption";
     }
@@ -7504,7 +7561,7 @@ To get a group's chatId, use /communities first.`
         await incrementModStat(chatIdStr, "scamsBlocked");
         await ctx.api.sendMessage(
           chatId,
-          `Caught that caption edit! New members can't sneak scam content in by editing captions.
+          `Caught that caption edit! Nobody sneaks scam content in by editing captions.
 @${username || ctx.editedMessage.from.first_name || "User"}, nice try but The Warden's watching.`
         );
       } catch (e) {
@@ -8407,6 +8464,9 @@ Admins, please review!`,
     const communityTrust = chatId && chatId < 0 && ctx.from?.id ? await getCommunityTrustClass(String(ctx.from.id), String(chatId)) : "normal";
     const hasFullCommunityTrust = communityTrust === "full";
     const hasTrustedCommunityTrust = communityTrust === "trusted";
+    if (chatId && chatId < 0 && communityTrust !== "full" && communityTrust !== "trusted") {
+      if (await recheckNameImpersonation(ctx)) return;
+    }
     ctx.session.lastActivityTime = Date.now();
     if (chatId && chatId < 0) {
       await markChatActivity(chatId);
