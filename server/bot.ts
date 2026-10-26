@@ -8677,6 +8677,20 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     if (!wasSpam) await next();
   });
   
+  // Photo and video repeat-post detection (same picture or clip again and again).
+  // Captioned posts already pass through the caption checks above; this still
+  // counts them, because spam raids usually repost the same image with a caption.
+  bot.on("message:photo", async (ctx, next) => {
+    const photos = ctx.message.photo;
+    const id = photos[photos.length - 1]?.file_unique_id;
+    const wasSpam = id ? await checkMediaSpam(ctx, id, "Photo") : false;
+    if (!wasSpam) await next();
+  });
+  bot.on("message:video", async (ctx, next) => {
+    const wasSpam = await checkMediaSpam(ctx, ctx.message.video.file_unique_id, "Video");
+    if (!wasSpam) await next();
+  });
+
   // Voice note spam detection
   bot.on("message:voice", async (ctx, next) => {
     const chatId = ctx.chat?.id;

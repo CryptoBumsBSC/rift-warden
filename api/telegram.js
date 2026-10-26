@@ -8368,6 +8368,16 @@ Admins, please review!`,
     const wasSpam = await checkMediaSpam(ctx, animationId, "GIF");
     if (!wasSpam) await next();
   });
+  bot.on("message:photo", async (ctx, next) => {
+    const photos = ctx.message.photo;
+    const id = photos[photos.length - 1]?.file_unique_id;
+    const wasSpam = id ? await checkMediaSpam(ctx, id, "Photo") : false;
+    if (!wasSpam) await next();
+  });
+  bot.on("message:video", async (ctx, next) => {
+    const wasSpam = await checkMediaSpam(ctx, ctx.message.video.file_unique_id, "Video");
+    if (!wasSpam) await next();
+  });
   bot.on("message:voice", async (ctx, next) => {
     const chatId = ctx.chat?.id;
     const userId = ctx.from?.id;
