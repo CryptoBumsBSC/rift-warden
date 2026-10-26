@@ -9,7 +9,7 @@ import { webhookCallback } from "grammy";
 
 // server/bot.ts
 import { Bot, session, InputFile } from "grammy";
-import OpenAI2 from "openai";
+import OpenAI3 from "openai";
 
 // server/db.ts
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -1327,6 +1327,185 @@ async function checkCoordinatedPosting(chatId, userId, text2) {
   return null;
 }
 
+// server/wildlife.ts
+import OpenAI2 from "openai";
+var openai2 = new OpenAI2({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+});
+var AUSTRALIA_PLACE_ID = 6744;
+var SEEN_KEY = "w:wildlife:seen";
+var SEEN_DAYS = 60;
+var OK_LICENCES = /* @__PURE__ */ new Set(["cc0", "cc-by", "cc-by-sa"]);
+function statusName(cs) {
+  if (!cs) return null;
+  const code = String(cs.status || "").toLowerCase();
+  if (code === "cr" || code === "ce") return "Critically Endangered";
+  if (code === "en" || code === "e") return "Endangered";
+  if (code === "vu" || code === "v") return "Vulnerable";
+  if (cs.iucn === 50) return "Critically Endangered";
+  if (cs.iucn === 40) return "Endangered";
+  if (cs.iucn === 30) return "Vulnerable";
+  return null;
+}
+var UA = { "User-Agent": "RiftWardenBot/1.0 (Boomerverse community; conservation awareness posts)" };
+async function getJson(url) {
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 1e4);
+    const res = await fetch(url, { headers: UA, signal: ctl.signal });
+    clearTimeout(t);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+async function recentlySeen() {
+  const seen = await stateGet(SEEN_KEY, {});
+  const cutoff = Date.now() - SEEN_DAYS * 24 * 60 * 60 * 1e3;
+  return Object.fromEntries(Object.entries(seen).filter(([, ts]) => ts > cutoff));
+}
+async function markWildlifeSeen(taxonId) {
+  const seen = await recentlySeen();
+  seen[String(taxonId)] = Date.now();
+  await stateSet(SEEN_KEY, seen, 90 * 24 * 60 * 60);
+}
+async function photoLooksSafe(url) {
+  try {
+    const ai = await openai2.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content: [
+        { type: "text", text: 'Is this a clear, wholesome photo of a living animal, plant or fungus in good condition? Answer false if it shows a dead, injured, trapped or distressed animal, any person or face, a dissected or preserved specimen, a museum drawing, a map, or heavy text or watermarks. JSON only: {"ok": true or false}' },
+        { type: "image_url", image_url: { url, detail: "low" } }
+      ] }],
+      max_tokens: 20
+    });
+    return JSON.parse(ai.choices[0]?.message?.content || "{}").ok === true;
+  } catch {
+    return false;
+  }
+}
+async function condense(common, sci, status, extract) {
+  try {
+    const ai = await openai2.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: 'You write short fact cards about threatened Australian wildlife for a friendly community. Use ONLY facts stated in the SOURCE TEXT. Never add facts from memory. If a detail is not in the text, leave that line out. Reply JSON: {"where": "...", "about": "...", "threats": "...", "numbers": "...", "surprise": "..."}. where = where it lives. about = what it is and looks like, one sentence. threats = what threatens it. numbers = how many are left, ONLY if the text gives a figure, else empty string. surprise = one interesting fact. Each value under 160 characters, plain language, no hype, no emojis.' },
+        { role: "user", content: `Species: ${common} (${sci}). Status: ${status}.
+
+SOURCE TEXT:
+${extract.slice(0, 3500)}` }
+      ],
+      max_tokens: 500
+    });
+    const v = JSON.parse(ai.choices[0]?.message?.content || "{}");
+    const lines = [];
+    if (v.about) lines.push(v.about.trim());
+    if (v.where) lines.push(`Where: ${v.where.trim()}`);
+    if (v.threats) lines.push(`Threats: ${v.threats.trim()}`);
+    if (v.numbers) lines.push(`How many: ${v.numbers.trim()}`);
+    if (v.surprise) lines.push(`Did you know: ${v.surprise.trim()}`);
+    return lines.length >= 3 ? lines.join("\n") : null;
+  } catch {
+    return null;
+  }
+}
+var wildlifeDebug = {};
+async function pickWildlifePost() {
+  const seen = await recentlySeen();
+  const page = 1 + Math.floor(Math.random() * 20);
+  const data = await getJson(
+    `https://api.inaturalist.org/v1/observations/species_counts?place_id=${AUSTRALIA_PLACE_ID}&threatened=true&rank=species&preferred_place_id=${AUSTRALIA_PLACE_ID}&locale=en&per_page=100&page=${page}`
+  );
+  const results = data?.results || [];
+  wildlifeDebug.fetched = results.length;
+  wildlifeDebug.apiOk = !!data;
+  wildlifeDebug.total = data?.total_results;
+  wildlifeDebug.sample = results.slice(0, 3).map((r) => ({ n: r.taxon?.name, cs: r.taxon?.conservation_status, lic: r.taxon?.default_photo?.license_code, wiki: !!r.taxon?.wikipedia_url, common: r.taxon?.preferred_common_name }));
+  const why = {};
+  const bump = (k) => {
+    why[k] = (why[k] || 0) + 1;
+    wildlifeDebug.skipped = why;
+  };
+  for (let i = results.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [results[i], results[j]] = [results[j], results[i]];
+  }
+  let tried = 0;
+  for (const r of results) {
+    const t = r.taxon;
+    if (!t || seen[String(t.id)]) {
+      bump("seen");
+      continue;
+    }
+    const cs0 = t.conservation_status;
+    if (cs0?.place && cs0.place.id !== AUSTRALIA_PLACE_ID) {
+      bump("statusPlace");
+      continue;
+    }
+    const statusLabel = statusName(cs0);
+    if (!statusLabel) {
+      bump("status");
+      continue;
+    }
+    const photo = t.default_photo;
+    if (!photo || !OK_LICENCES.has(String(photo.license_code || "").toLowerCase())) {
+      bump("licence");
+      continue;
+    }
+    if (!t.wikipedia_url || !t.preferred_common_name) {
+      bump("nowiki");
+      continue;
+    }
+    if (++tried > 12) break;
+    const title = decodeURIComponent(String(t.wikipedia_url).split("/wiki/")[1] || "");
+    if (!title) continue;
+    const wiki = await getJson(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+    const extract = wiki?.extract || "";
+    if (extract.length < 250) {
+      bump("shortwiki");
+      continue;
+    }
+    const photoUrl = photo.large_url || String(photo.medium_url || "").replace("/medium.", "/large.");
+    if (!photoUrl) continue;
+    if (!await photoLooksSafe(photoUrl)) {
+      bump("photocheck");
+      continue;
+    }
+    const status = statusLabel;
+    const authority = String(t.conservation_status?.authority || "").trim();
+    const body = await condense(t.preferred_common_name, t.name, status, extract);
+    if (!body) {
+      bump("condense");
+      continue;
+    }
+    const credit = String(photo.attribution || "Photo: iNaturalist contributor").replace(/\s+/g, " ").slice(0, 140);
+    const caption = `${String(t.preferred_common_name).toUpperCase()}
+${t.name}
+Status: ${status}${authority ? ` (${authority})` : ""}
+
+${body}
+
+Help: back local conservation groups and log sightings on the Atlas of Living Australia.
+
+${credit}. Photo via iNaturalist. Facts from Wikipedia.`;
+    return {
+      taxonId: t.id,
+      commonName: t.preferred_common_name,
+      scientificName: t.name,
+      status,
+      photoUrl,
+      credit,
+      caption: caption.slice(0, 1020),
+      group: t.iconic_taxon_name || ""
+    };
+  }
+  return null;
+}
+
 // server/bot.ts
 var BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 var BOT_USERNAME2 = (process.env.BOT_USERNAME || "RiftWardenBot").replace(/^@/, "");
@@ -1345,7 +1524,7 @@ var OFFICIAL_TELEGRAM_URL = (process.env.OFFICIAL_TELEGRAM_URL || "").trim();
 var PUBLIC_URL = (process.env.PUBLIC_URL || "").trim().replace(/\/+$/, "");
 var RIFT_RADIO_URL = (process.env.RIFT_RADIO_URL || (PUBLIC_URL ? `${PUBLIC_URL}/rift-radio.html` : "")).trim();
 var COMMUNITY_TIMEZONE = (process.env.COMMUNITY_TIMEZONE || "Australia/Hobart").trim();
-var openai2 = new OpenAI2({
+var openai3 = new OpenAI3({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
 });
@@ -3445,7 +3624,7 @@ ABSOLUTE RULES \u2014 breaking these is worse than being unhelpful:
 STYLE: You have a strong, recognisable personality. You are dry, observant, cheeky and Australian without becoming a caricature. Be warm with genuine members, especially newcomers. You can banter, tease lightly, tell a short story, explain the project in detail, and keep a real conversation going when somebody is talking directly to you. Usually answer in 2-6 sentences; use more when a newcomer genuinely needs orientation. Only use a member's name if one is given in Context. Never write a placeholder such as @username. Never become rude, cruel, flirty, or chaotic. No emoji spam. Safety and canon accuracy always outrank a joke.`;
 async function getAIResponse(prompt, context) {
   try {
-    const response = await openai2.chat.completions.create({
+    const response = await openai3.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: `${WARDEN_SYSTEM_PROMPT}
@@ -3943,7 +4122,7 @@ Confirmed facts only:
 NEVER invent character names, region names, class names, dates, roadmap items or
 numbers beyond the list above. If it is not listed, do not write a question about it.
 `;
-async function generateAiTriviaQuestion(openai3) {
+async function generateAiTriviaQuestion(openai4) {
   const topics = [
     "tas_threatened",
     "tas_flora",
@@ -3990,7 +4169,7 @@ async function generateAiTriviaQuestion(openai3) {
   };
   ;
   try {
-    const response = await openai3.chat.completions.create({
+    const response = await openai4.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
@@ -4056,7 +4235,7 @@ function getShuffledStaticQueue() {
   }
   return indices;
 }
-async function getTriviaQuestion(openai3) {
+async function getTriviaQuestion(openai4) {
   const now = Date.now();
   if (aiTriviaCache.length > 0) {
     const question = aiTriviaCache.pop();
@@ -4064,7 +4243,7 @@ async function getTriviaQuestion(openai3) {
   }
   if (now - lastAiGenerationTime > AI_TRIVIA_COOLDOWN) {
     lastAiGenerationTime = now;
-    const aiQuestion = await generateAiTriviaQuestion(openai3);
+    const aiQuestion = await generateAiTriviaQuestion(openai4);
     if (aiQuestion) {
       return shuffleOptions(aiQuestion);
     }
@@ -4075,10 +4254,10 @@ async function getTriviaQuestion(openai3) {
   const idx = staticQuestionQueue.pop();
   return shuffleOptions(TRIVIA_QUESTIONS[idx]);
 }
-async function prefillTriviaCache(openai3) {
+async function prefillTriviaCache(openai4) {
   if (aiTriviaCache.length >= 5) return;
   for (let i = 0; i < 3; i++) {
-    const question = await generateAiTriviaQuestion(openai3);
+    const question = await generateAiTriviaQuestion(openai4);
     if (question) {
       aiTriviaCache.push(question);
     }
@@ -4686,7 +4865,7 @@ async function scanPhotoForScam(ctx) {
     if (buf.length > 4 * 1024 * 1024) return false;
     const dataUrl = `data:image/jpeg;base64,${buf.toString("base64")}`;
     const ai = await Promise.race([
-      openai2.chat.completions.create({
+      openai3.chat.completions.create({
         model: "gpt-4o-mini",
         response_format: { type: "json_object" },
         messages: [
@@ -4830,7 +5009,7 @@ async function checkProfilePhotoClone(ctx, member) {
     ];
     for (const r of refs) content.push({ type: "image_url", image_url: { url: r.url, detail: "low" } });
     const ai = await Promise.race([
-      openai2.chat.completions.create({ model: "gpt-4o-mini", response_format: { type: "json_object" }, messages: [{ role: "user", content }], max_tokens: 40 }),
+      openai3.chat.completions.create({ model: "gpt-4o-mini", response_format: { type: "json_object" }, messages: [{ role: "user", content }], max_tokens: 40 }),
       new Promise((resolve) => setTimeout(() => resolve(null), 8e3))
     ]);
     if (!ai) return;
@@ -4850,6 +5029,25 @@ async function checkProfilePhotoClone(ctx, member) {
     console.log("Profile photo check failed (allowed through):", e);
   }
 }
+async function postWildlife(api, chatId) {
+  const post = await pickWildlifePost();
+  if (!post) return false;
+  try {
+    await api.sendPhoto(chatId, post.photoUrl, { caption: post.caption });
+  } catch {
+    try {
+      const res = await fetch(post.photoUrl);
+      if (!res.ok) return false;
+      await api.sendPhoto(chatId, new InputFile(Buffer.from(await res.arrayBuffer()), "wildlife.jpg"), { caption: post.caption });
+    } catch (e) {
+      console.log("Wildlife photo send failed:", e);
+      return false;
+    }
+  }
+  await markWildlifeSeen(post.taxonId);
+  return true;
+}
+var WILDLIFE_CFG = (chatId) => `w:wildlife:cfg:${chatId}`;
 function createBot() {
   const bot = new Bot(BOT_TOKEN);
   botInstance = bot;
@@ -4897,7 +5095,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -6109,7 +6307,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       await endTriviaRound(chatId, bot2);
       return;
     }
-    const question = await getTriviaQuestion(openai2);
+    const question = await getTriviaQuestion(openai3);
     trivia.currentQuestion = question;
     trivia.questionStartTime = Date.now();
     trivia.questionDeadline = Date.now() + TRIVIA_QUESTION_MS;
@@ -6188,9 +6386,9 @@ Answer with /answer 1-4`);
     let questionCount = parseInt(argText || "") || 1;
     questionCount = Math.max(1, Math.min(25, questionCount));
     await ctx.reply(`Starting trivia round with ${questionCount} question${questionCount > 1 ? "s" : ""}...`);
-    prefillTriviaCache(openai2).catch(() => {
+    prefillTriviaCache(openai3).catch(() => {
     });
-    const firstQuestion = await getTriviaQuestion(openai2);
+    const firstQuestion = await getTriviaQuestion(openai3);
     await saveTrivia(ctx.chat.id, {
       currentQuestion: firstQuestion,
       questionStartTime: Date.now(),
@@ -6636,6 +6834,23 @@ Usernames can change. This number is what The Warden uses for secure role author
     } catch {
       await ctx.reply("Posted, but I couldn't pin it. Make me an admin with the Pin Messages right, then send /pinsafety again.");
     }
+  });
+  bot.command("wildlife", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
+    const ok = await postWildlife(ctx.api, ctx.chat.id);
+    if (!ok) await ctx.reply("Couldn't find a good wildlife post just now. Try again in a minute.");
+  });
+  bot.command("wildlifeauto", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
+    const v = (ctx.match || "").toString().trim().toLowerCase();
+    if (!["daily", "twice", "off"].includes(v)) {
+      const cur = await stateGet(WILDLIFE_CFG(ctx.chat.id), "off");
+      await ctx.reply(`Wildlife posts are: ${cur}.
+Use /wildlifeauto daily (every day at noon), /wildlifeauto twice (Tuesday and Saturday at noon) or /wildlifeauto off.`);
+      return;
+    }
+    await stateSet(WILDLIFE_CFG(ctx.chat.id), v, 5 * 365 * 24 * 60 * 60);
+    await ctx.reply(`Wildlife posts set to: ${v}.`);
   });
   bot.command("log", async (ctx) => {
     if (!ctx.chat || !ctx.from || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;

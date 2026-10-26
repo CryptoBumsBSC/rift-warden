@@ -79,7 +79,6 @@ function statusName(cs) {
   if (cs.iucn === 30) return "Vulnerable";
   return null;
 }
-var LICENCE_NAMES = { "cc0": "CC0", "cc-by": "CC BY", "cc-by-sa": "CC BY-SA" };
 var UA = { "User-Agent": "RiftWardenBot/1.0 (Boomerverse community; conservation awareness posts)" };
 async function getJson(url) {
   try {
@@ -168,7 +167,12 @@ async function pickWildlifePost() {
       bump("seen");
       continue;
     }
-    const statusLabel = statusName(t.conservation_status);
+    const cs0 = t.conservation_status;
+    if (cs0?.place && cs0.place.id !== AUSTRALIA_PLACE_ID) {
+      bump("statusPlace");
+      continue;
+    }
+    const statusLabel = statusName(cs0);
     if (!statusLabel) {
       bump("status");
       continue;
@@ -198,14 +202,16 @@ async function pickWildlifePost() {
       continue;
     }
     const status = statusLabel;
+    const authority = String(t.conservation_status?.authority || "").trim();
     const body = await condense(t.preferred_common_name, t.name, status, extract);
     if (!body) {
       bump("condense");
       continue;
     }
-    const credit = `${String(photo.attribution || "Photo: iNaturalist contributor").replace(/\s+/g, " ").slice(0, 120)} (${LICENCE_NAMES[String(photo.license_code).toLowerCase()]})`;
+    const credit = String(photo.attribution || "Photo: iNaturalist contributor").replace(/\s+/g, " ").slice(0, 140);
     const caption = `${String(t.preferred_common_name).toUpperCase()}
-${t.name} | ${status}
+${t.name}
+Status: ${status}${authority ? ` (${authority})` : ""}
 
 ${body}
 

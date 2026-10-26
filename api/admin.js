@@ -476,7 +476,7 @@ import { eq as eq3, desc as desc2, sql as sql3, and as and2 } from "drizzle-orm"
 
 // server/bot.ts
 import { Bot, session, InputFile } from "grammy";
-import OpenAI2 from "openai";
+import OpenAI3 from "openai";
 
 // server/communityService.ts
 import { eq } from "drizzle-orm";
@@ -632,6 +632,13 @@ var DOMAIN_ALLOWLIST = [
 var BEHAVIOUR_TTL = 30 * 24 * 60 * 60;
 var CAMPAIGN_WINDOW_MS = 10 * 60 * 1e3;
 
+// server/wildlife.ts
+import OpenAI2 from "openai";
+var openai2 = new OpenAI2({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+});
+
 // server/bot.ts
 var BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 var BOT_USERNAME2 = (process.env.BOT_USERNAME || "RiftWardenBot").replace(/^@/, "");
@@ -650,7 +657,7 @@ var OFFICIAL_TELEGRAM_URL = (process.env.OFFICIAL_TELEGRAM_URL || "").trim();
 var PUBLIC_URL = (process.env.PUBLIC_URL || "").trim().replace(/\/+$/, "");
 var RIFT_RADIO_URL = (process.env.RIFT_RADIO_URL || (PUBLIC_URL ? `${PUBLIC_URL}/rift-radio.html` : "")).trim();
 var COMMUNITY_TIMEZONE = (process.env.COMMUNITY_TIMEZONE || "Australia/Hobart").trim();
-var openai2 = new OpenAI2({
+var openai3 = new OpenAI3({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
 });

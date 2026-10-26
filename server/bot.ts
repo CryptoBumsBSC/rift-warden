@@ -12,6 +12,7 @@ import {
   isSuspiciousBotName, detectAdminCompromise, hasHomoglyphs,
 } from "./nftSecurity";
 import { assessBehaviour, checkCoordinatedPosting } from "./behaviour";
+import { pickWildlifePost, markWildlifeSeen } from "./wildlife";
 import * as StoryBible from "./riftLore";
 
 // === BOT TOKEN ===
@@ -4625,6 +4626,25 @@ async function checkProfilePhotoClone(ctx: MyContext, member: { id: number; user
   }
 }
 
+
+// === WILDLIFE POSTS ===
+async function postWildlife(api: MyContext["api"], chatId: number): Promise<boolean> {
+  const post = await pickWildlifePost();
+  if (!post) return false;
+  try {
+    await api.sendPhoto(chatId, post.photoUrl, { caption: post.caption });
+  } catch {
+    try {
+      const res = await fetch(post.photoUrl);
+      if (!res.ok) return false;
+      await api.sendPhoto(chatId, new InputFile(Buffer.from(await res.arrayBuffer()), "wildlife.jpg"), { caption: post.caption });
+    } catch (e) { console.log("Wildlife photo send failed:", e); return false; }
+  }
+  await markWildlifeSeen(post.taxonId);
+  return true;
+}
+const WILDLIFE_CFG = (chatId: string | number) => `w:wildlife:cfg:${chatId}`;
+
 // === BOT SETUP ===
 export function createBot(): Bot<MyContext> {
   const bot = new Bot<MyContext>(BOT_TOKEN!);
@@ -4690,7 +4710,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -6840,6 +6860,26 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     }
   });
 
+
+  // /wildlife - post a threatened Australian species now (admins/owner)
+  bot.command("wildlife", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
+    const ok = await postWildlife(ctx.api, ctx.chat.id);
+    if (!ok) await ctx.reply("Couldn't find a good wildlife post just now. Try again in a minute.");
+  });
+
+  // /wildlifeauto daily | twice | off
+  bot.command("wildlifeauto", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
+    const v = (ctx.match || "").toString().trim().toLowerCase();
+    if (!["daily", "twice", "off"].includes(v)) {
+      const cur = await stateGet<string>(WILDLIFE_CFG(ctx.chat.id), "off");
+      await ctx.reply(`Wildlife posts are: ${cur}.\nUse /wildlifeauto daily (every day at noon), /wildlifeauto twice (Tuesday and Saturday at noon) or /wildlifeauto off.`);
+      return;
+    }
+    await stateSet(WILDLIFE_CFG(ctx.chat.id), v, 5 * 365 * 24 * 60 * 60);
+    await ctx.reply(`Wildlife posts set to: ${v}.`);
+  });
 
   // === ADMIN TOOLS: mod log, scheduled posts, holders, appeals ===
 
@@ -11776,6 +11816,14 @@ export async function runCronTick(): Promise<{ ran: string[] }> {
   catch (err) { console.error("[cron] scheduled posts failed:", err); }
 
   const { weekday } = localParts();
+  await onceDaily("wildlife", 12, async () => {
+    for (const chatId of Array.from(activeChats)) {
+      const cfg = await stateGet<string>(WILDLIFE_CFG(chatId), "off");
+      if (cfg === "off") continue;
+      if (cfg === "twice" && weekday !== "Tue" && weekday !== "Sat") continue;
+      try { if (await postWildlife(bot.api, chatId)) ran.push(`wildlife:${chatId}`); } catch (e) { console.log("Wildlife cron failed:", e); }
+    }
+  });
   if (weekday === "Mon") await onceDaily("scam-reminder", 10, async () => { await postWeeklyScamReminder(bot); ran.push("scam-reminder"); });
   if (weekday === "Wed") await onceDaily("trivia", 18, async () => { await postWeeklyTrivia(bot); ran.push("trivia"); });
   if (weekday === "Fri") await onceDaily("game-night", 18, async () => { await postGameNight(bot); ran.push("game-night"); });

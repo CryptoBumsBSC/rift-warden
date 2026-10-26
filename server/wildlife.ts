@@ -129,7 +129,9 @@ export async function pickWildlifePost(): Promise<WildlifePost | null> {
   for (const r of results) {
     const t = r.taxon;
     if (!t || seen[String(t.id)]) { bump('seen'); continue; }
-    const statusLabel = statusName(t.conservation_status);
+    const cs0 = t.conservation_status;
+    if (cs0?.place && cs0.place.id !== AUSTRALIA_PLACE_ID) { bump('statusPlace'); continue; }
+    const statusLabel = statusName(cs0);
     if (!statusLabel) { bump('status'); continue; }
     const photo = t.default_photo;
     if (!photo || !OK_LICENCES.has(String(photo.license_code || "").toLowerCase())) { bump('licence'); continue; }
@@ -147,12 +149,13 @@ export async function pickWildlifePost(): Promise<WildlifePost | null> {
     if (!(await photoLooksSafe(photoUrl))) { bump('photocheck'); continue; }
 
     const status = statusLabel;
+    const authority = String(t.conservation_status?.authority || "").trim();
     const body = await condense(t.preferred_common_name, t.name, status, extract);
     if (!body) { bump('condense'); continue; }
 
-    const credit = `${String(photo.attribution || "Photo: iNaturalist contributor").replace(/\s+/g, " ").slice(0, 120)} (${LICENCE_NAMES[String(photo.license_code).toLowerCase()]})`;
+    const credit = String(photo.attribution || "Photo: iNaturalist contributor").replace(/\s+/g, " ").slice(0, 140);
     const caption =
-      `${String(t.preferred_common_name).toUpperCase()}\n${t.name} | ${status}\n\n${body}\n\n` +
+      `${String(t.preferred_common_name).toUpperCase()}\n${t.name}\nStatus: ${status}${authority ? ` (${authority})` : ""}\n\n${body}\n\n` +
       `Help: back local conservation groups and log sightings on the Atlas of Living Australia.\n\n` +
       `${credit}. Photo via iNaturalist. Facts from Wikipedia.`;
     return {
