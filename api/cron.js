@@ -5328,8 +5328,21 @@ async function postWildlife(api, chatId, named) {
 var WILDLIFE_CFG = (chatId) => `w:wildlife:cfg:${chatId}`;
 var PROTECTED_KEY = (chatId) => `w:protected:${chatId}`;
 var PROTECTED_DEFAULT = [{ username: "RealAshleyWard", label: "@RealAshleyWard" }];
+function ownerProtected() {
+  return { id: GLOBAL_OWNER_USER_ID || void 0, username: "aussieboomer", names: ["aussieboomer", "aussie boomer"], label: "@aussieboomer", male: true };
+}
 async function getProtected(chatId) {
-  return await stateGet(PROTECTED_KEY(chatId), PROTECTED_DEFAULT);
+  const list = await stateGet(PROTECTED_KEY(chatId), PROTECTED_DEFAULT);
+  const o = ownerProtected();
+  const has = list.some((p) => o.id && p.id === o.id || p.username && p.username.toLowerCase() === "aussieboomer");
+  if (has) {
+    for (const p of list) if (o.id && p.id === o.id || p.username && p.username.toLowerCase() === "aussieboomer") {
+      p.male = true;
+      if (!p.id && o.id) p.id = o.id;
+    }
+    return list;
+  }
+  return [...list, o];
 }
 async function saveProtected(chatId, list) {
   await stateSet(PROTECTED_KEY(chatId), list, 5 * 365 * 24 * 60 * 60);
@@ -5359,6 +5372,7 @@ var PILE_LIMIT = 3;
 var PILE_WINDOW_MS = 10 * 60 * 1e3;
 var PILE_FREEZE_MS = 10 * 60 * 1e3;
 var PROTECTED_PRONOUNS = /\b(she|her|hers|herself|that (girl|woman|lady|chick|person)|this (girl|woman|lady|person))\b/i;
+var PROTECTED_PRONOUNS_MALE = /\b(he|him|his|himself|that (guy|man|bloke|dude|person)|this (guy|man|bloke|dude|person))\b/i;
 async function alertProtectedOwners(api, text2) {
   for (const id of protectedAlertIds()) {
     try {
@@ -5413,6 +5427,8 @@ async function captureProtectedId(ctx) {
       const tr = await stateGet(PTRACK_KEY(chat.id), { ids: [], lastHer: 0 });
       tr.ids = [...tr.ids, mid].slice(-200);
       tr.lastHer = Date.now();
+      tr.who = hit.label;
+      tr.male = !!hit.male;
       await stateSet(PTRACK_KEY(chat.id), tr, 24 * 60 * 60);
     }
   } catch {
@@ -5449,9 +5465,9 @@ async function holdProtectedHarassment(ctx, text2, messageId) {
   if (!targeted) {
     const replyId = msg.reply_to_message?.message_id;
     threadHit = !!replyId && track.ids.includes(replyId);
-    pronounHit = !threadHit && PROTECTED_PRONOUNS.test(text2) && Date.now() - track.lastHer < 15 * 60 * 1e3;
+    pronounHit = !threadHit && (track.male ? PROTECTED_PRONOUNS_MALE : PROTECTED_PRONOUNS).test(text2) && Date.now() - track.lastHer < 15 * 60 * 1e3;
     if (threadHit || pronounHit) {
-      targeted = list[0];
+      targeted = list.find((p) => p.label === track.who) || list[0];
       nameOnly = true;
     }
   } else if (msg.reply_to_message?.message_id && track.ids.includes(msg.reply_to_message.message_id)) {
@@ -5494,7 +5510,7 @@ async function holdProtectedHarassment(ctx, text2, messageId) {
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "You protect a community member from being picked on. Decide if the message below is hostile toward the protected member: insults, mockery, put-downs, sarcasm meant to demean, harassment, sexual remarks, threats, belittling them, or stirring others up against them. Friendly or neutral messages, questions and compliments are NOT hostile. " + (nameOnly ? threadHit || pronounHit ? `The message was not sent to them directly and may not name them. It sits in a conversation about the protected member (${threadHit ? "it replies inside a thread under their posts" : "they posted a few minutes ago and it uses she/her words"}). Set about_protected true if it is plausibly about them. ` : `The message was not sent to them directly. It may mention their name (${protectedWords(targeted).join(", ")}), which could also belong to someone else. Set about_protected true ONLY if it is clearly about the protected member. ` : "It is aimed at the protected member. ") + 'Set severe true ONLY for slurs, threats of harm, or sexual remarks/sexual harassment about them. Reply JSON only: {"hostile": true or false, "about_protected": true or false, "severe": true or false, "confidence": "high" or "low", "reason": "short reason"}.' },
+        { role: "system", content: "You protect a community member from being picked on. Decide if the message below is hostile toward the protected member: insults, mockery, put-downs, sarcasm meant to demean, harassment, sexual remarks, threats, belittling them, or stirring others up against them. Friendly or neutral messages, questions and compliments are NOT hostile. " + (nameOnly ? threadHit || pronounHit ? `The message was not sent to them directly and may not name them. It sits in a conversation about the protected member (${threadHit ? "it replies inside a thread under their posts" : "they posted a few minutes ago and it uses pronoun words (she/her or he/him)"}). Set about_protected true if it is plausibly about them. ` : `The message was not sent to them directly. It may mention their name (${protectedWords(targeted).join(", ")}), which could also belong to someone else. Set about_protected true ONLY if it is clearly about the protected member. ` : "It is aimed at the protected member. ") + 'Set severe true ONLY for slurs, threats of harm, or sexual remarks/sexual harassment about them. Reply JSON only: {"hostile": true or false, "about_protected": true or false, "severe": true or false, "confidence": "high" or "low", "reason": "short reason"}.' },
         { role: "user", content: (quotedCtx ? `(Replying to: ${quotedCtx})
 ` : "") + text2.slice(0, 1200) }
       ],
