@@ -4696,8 +4696,16 @@ async function holdCryptoAddress(ctx, text2, messageId) {
   return true;
 }
 var ADMIN_ONLY_WORDS = /\bjust[\s_.\-]*fomo|\bfomo[\s_.\-]*daily/i;
+var ADMIN_ONLY_BUY_CALLS = [
+  /\bbuy[\s_.\-]*(it[\s_.\-]*)?now\b/i,
+  /\bbuy\s+(the\s+|this\s+|our\s+)?(token|tokens|coin|coins)\b/i,
+  /\bsend\s+(\d+(\.\d+)?\s*)?(eth|ether|usdt|usdc|sol|btc|bnb|matic|crypto)\b/i,
+  /\bape\s+in\b/i,
+  /\bbuy\s+(here|at|on|from)\s+(uniswap|pancakeswap|jupiter|raydium|dex|opensea|magic\s*eden)\b/i
+];
 function containsAdminOnlyWord(text2) {
-  return ADMIN_ONLY_WORDS.test(text2 || "");
+  const t = text2 || "";
+  return ADMIN_ONLY_WORDS.test(t) || ADMIN_ONLY_BUY_CALLS.some((r) => r.test(t));
 }
 async function holdAdminOnlyWord(ctx, text2, messageId) {
   const from = ctx.from, chat = ctx.chat;
@@ -4709,7 +4717,7 @@ async function holdAdminOnlyWord(ctx, text2, messageId) {
     messageId,
     text2,
     "banned_word",
-    "That word is admin-only in this group."
+    "That wording is admin-only in this group."
   );
   return true;
 }

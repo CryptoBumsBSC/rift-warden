@@ -4278,8 +4278,18 @@ async function holdCryptoAddress(ctx: MyContext, text: string, messageId: number
 // Plain "fomo" on its own is fine. Spaces, dots, dashes and underscores between
 // the parts are caught too ("just_fomo", "fomo.daily").
 const ADMIN_ONLY_WORDS = /\bjust[\s_.\-]*fomo|\bfomo[\s_.\-]*daily/i;
+// Buy calls: "buy now", "buy it now", "buy the token", "send 0.1 ETH", "ape in",
+// "buy on Uniswap". Ordinary talk about buying something ("I want to buy it") is fine.
+const ADMIN_ONLY_BUY_CALLS = [
+  /\bbuy[\s_.\-]*(it[\s_.\-]*)?now\b/i,
+  /\bbuy\s+(the\s+|this\s+|our\s+)?(token|tokens|coin|coins)\b/i,
+  /\bsend\s+(\d+(\.\d+)?\s*)?(eth|ether|usdt|usdc|sol|btc|bnb|matic|crypto)\b/i,
+  /\bape\s+in\b/i,
+  /\bbuy\s+(here|at|on|from)\s+(uniswap|pancakeswap|jupiter|raydium|dex|opensea|magic\s*eden)\b/i,
+];
 function containsAdminOnlyWord(text: string): boolean {
-  return ADMIN_ONLY_WORDS.test(text || "");
+  const t = text || "";
+  return ADMIN_ONLY_WORDS.test(t) || ADMIN_ONLY_BUY_CALLS.some(r => r.test(t));
 }
 
 async function holdAdminOnlyWord(ctx: MyContext, text: string, messageId: number): Promise<boolean> {
@@ -4288,7 +4298,7 @@ async function holdAdminOnlyWord(ctx: MyContext, text: string, messageId: number
   if (!containsAdminOnlyWord(text)) return false;
   if (await isUserAdmin(ctx, from.id)) return false;
   await punishRestrictedContent(ctx, messageId, text, "banned_word",
-    "That word is admin-only in this group.");
+    "That wording is admin-only in this group.");
   return true;
 }
 
