@@ -4893,6 +4893,85 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
 }
 
 
+
+// === PROJECT PROTECTION (separate module, on/off per group with /projectprotect on|off, default OFF) ===
+// Posts accusing the project (Boomerverse) or a protected person (the owner, team) of being a scam, con, fake or fraud are removed.
+// First time per member: removed with a friendly note. After that: the usual mute ladder.
+const PROJPROT_KEY = (chatId: number | string) => `w:projprot:${chatId}`;
+const PROJACCUSE_KEY = (chatId: number | string, uid: number | string) => `w:projaccuse:${chatId}:${uid}`;
+const PROJECT_NAMES_DEFAULT = ["boomerverse", "bvgen", "boomerverse genesis", "rift warden", "rift roll"];
+const PHOMO: Record<string, string> = { "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ѕ": "s", "ј": "j", "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "$": "s", "@": "a", "!": "i" };
+function projNorm(t: string): string {
+  return t.normalize("NFKD").replace(/[\u0300-\u036f\u200b-\u200f\u2060\ufeff]/g, "").toLowerCase().replace(/[^\s]/g, ch => PHOMO[ch] ?? ch);
+}
+const PROJ_ACCUSE_RE = /(scam|con\b|conn?ed|conman|con ?artist|rug|ponzi|fraud|fake|thie|stole|steal|liar|lying|lies\b|fleec|rip ?off|ripped|honeypot|pump ?and ?dump|exit ?scam|cash ?grab|sham\b|crook|criminal|dodgy|shonky|bogus|deceiv|swindl|robb|dev ?left|devs? ?(will )?run)/i;
+
+async function holdProjectAccusation(ctx: MyContext, text: string, messageId: number): Promise<boolean> {
+  const from = ctx.from, chat = ctx.chat, msg = ctx.message ?? ctx.editedMessage;
+  const wasEdit = !ctx.message;
+  if (!from || !chat || !msg || from.is_bot || chat.id >= 0) return false;
+  if (!(await stateGet<boolean>(PROJPROT_KEY(chat.id), false))) return false;
+  const n = projNorm(text), compact = n.replace(/[^a-z]/g, "");
+  if (!PROJ_ACCUSE_RE.test(n) && !PROJ_ACCUSE_RE.test(compact)) return false;
+  const people = await getProtected(chat.id);
+  // Protected people and admins may say what they like.
+  if (people.some(p => (p.id && p.id === String(from.id)) || (p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase()))) return false;
+  const names = Array.from(new Set([...PROJECT_NAMES_DEFAULT, ...people.flatMap(protectedWords)]));
+  const repliedTo = msg.reply_to_message?.from;
+  const aimed = !!repliedTo && people.some(p => (p.id && p.id === String(repliedTo.id)) || (p.username && repliedTo.username && p.username.toLowerCase() === repliedTo.username.toLowerCase()));
+  if (!aimed && !names.some(w => wordIn(n, projNorm(w)))) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+
+  let accuses = false, imposter = false, confident = false, reason = "";
+  try {
+    const ai = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content:
+          `A community protects its project, business, products, owner and team (names: ${names.join(", ")}) from false accusations. Decide if the message accuses the project, its products, its owner or its team of being a scam, a con, fake, fraud, a rug pull, theft, or lying to or deceiving people` +
+          (aimed ? " (the message is a reply to a protected person, so an accusation aimed at them counts)" : "") + ". " +
+          "These are NOT accusations: honest questions (such as asking if it is legit), ordinary complaints about features, bugs, prices or delays, praise, neutral talk, and warnings about FAKE accounts, fake links or impersonators pretending to be the project. " +
+          'Reply JSON only: {"accusation": true or false, "impersonator_warning": true or false, "confidence": "high" or "low", "reason": "short reason"}.' },
+        { role: "user", content: text.slice(0, 1200) + (n !== text.toLowerCase() ? `\n(look-alike letters undone: ${n.slice(0, 1200)})` : "") },
+      ],
+      max_tokens: 80,
+    });
+    const v = JSON.parse(ai.choices[0]?.message?.content || "{}") as any;
+    accuses = v.accusation === true; imposter = v.impersonator_warning === true; confident = v.confidence === "high";
+    reason = String(v.reason || "accusation against the project or its people").slice(0, 100);
+  } catch { return false; } // fail open
+  if (!accuses || imposter) return false;
+  if (!confident) {
+    const who = from.username ? `@${from.username}` : (from.first_name || String(from.id));
+    await alertProtectedOwners(ctx.api, `PROJECT ALERT (no action taken)\nGroup: ${chat.title || chat.id}\nFrom: ${who}\nMessage: ${text.slice(0, 500)}\n\nThis may accuse the project or its people of dishonesty, but I wasn't sure enough to remove it. Please check.`);
+    return false;
+  }
+  try { await ctx.api.deleteMessage(chat.id, messageId); } catch {}
+  const who = from.username ? `@${from.username}` : (from.first_name || "A member");
+  let action = "delete";
+  try {
+    const count = await stateIncr(PROJACCUSE_KEY(chat.id, from.id), 30 * 24 * 60 * 60);
+    if (count <= 1) {
+      await ctx.api.sendMessage(chat.id, `${who}, that message was removed. Honest questions are always welcome, but calling the project or its people a scam or a con isn't. If you have a genuine concern, tell the admins and it will be looked at.`);
+    } else {
+      const r = await addOffense(chat.id, from.id);
+      if (r.shouldBan) { await ctx.api.banChatMember(chat.id, from.id); await ctx.api.sendMessage(chat.id, `${who} removed. Keep it kind in here.`); action = "ban"; }
+      else {
+        await ctx.api.restrictChatMember(chat.id, from.id, { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
+          { until_date: Math.floor(Date.now() / 1000) + r.muteSeconds });
+        await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(r.muteSeconds)}${wasEdit ? " (message was changed after posting)" : ""}. Keep it kind in here.`,
+          { reply_markup: { inline_keyboard: [[{ text: "Think this is a mistake? Ask admins", callback_data: `appeal:${from.id}` }]] } });
+        action = "mute";
+      }
+    }
+    await logViolation(String(chat.id), String(from.id), from.username || "", "project_accusation", text.slice(0, 120), `${wasEdit ? "Edited message. " : ""}${reason}`, action);
+    await incrementModStat(String(chat.id), "messagesBlocked");
+  } catch (e) { console.log("Project accusation hold failed:", e); }
+  await checkPileOn(ctx, chat.id);
+  return true;
+}
+
 // Replies to protected-list commands go to the owner privately, and the command is removed from the group.
 async function privateOwnerReply(ctx: MyContext, text: string): Promise<void> {
   try { if (ctx.chat && ctx.message) await ctx.api.deleteMessage(ctx.chat.id, ctx.message.message_id); } catch {}
@@ -4965,7 +5044,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -7159,6 +7238,20 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     await privateOwnerReply(ctx, "Added to the protected list. Anyone who targets them with insults or put-downs will be removed and muted. Only the owners and approved managers can see or change this list.");
   });
 
+  bot.command("projectprotect", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const arg = (ctx.match || "").toString().trim().toLowerCase();
+    if (arg === "on" || arg === "off") {
+      await stateSet(PROJPROT_KEY(ctx.chat.id), arg === "on", 5 * 365 * 24 * 60 * 60);
+      await privateOwnerReply(ctx, arg === "on"
+        ? "Project protection is ON. Posts calling the project, the owner or protected people a scam, con, fake or fraud are removed (first time with a friendly note, then mutes). Honest questions and fake-account warnings are left alone."
+        : "Project protection is OFF.");
+    } else {
+      const on = await stateGet<boolean>(PROJPROT_KEY(ctx.chat.id), false);
+      await privateOwnerReply(ctx, `Project protection is ${on ? "ON" : "OFF"}. Use /projectprotect on or /projectprotect off.`);
+    }
+  });
+
   bot.command("unprotect", async (ctx) => {
     if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
     const replied = ctx.message?.reply_to_message?.from;
@@ -8696,7 +8789,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     // contract addresses) apply to established members too.
     const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
     if (_editTrust === "full") return;
-    if (await holdProtectedHarassment(ctx, newText, ctx.editedMessage.message_id)) return;
+    if ((await holdProtectedHarassment(ctx, newText, ctx.editedMessage.message_id) || await holdProjectAccusation(ctx, newText, ctx.editedMessage.message_id))) return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
     
     // Retrieve original content from database (if tracked)
@@ -8787,7 +8880,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       const member = await ctx.api.getChatMember(chatId, userId);
       if (member.status === "administrator" || member.status === "creator") return;
     } catch { /* continue with check */ }
-    if ((await getCommunityTrustClass(userIdStr, chatIdStr)) !== "full" && await holdProtectedHarassment(ctx, caption, ctx.editedMessage.message_id)) return;
+    if ((await getCommunityTrustClass(userIdStr, chatIdStr)) !== "full" && (await holdProtectedHarassment(ctx, caption, ctx.editedMessage.message_id) || await holdProjectAccusation(ctx, caption, ctx.editedMessage.message_id))) return;
     
     // Check if user is new
     // Everyone except trusted members is checked. Links are only blocked for
@@ -9974,7 +10067,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     // may post links and pictures, but are still checked for scams.
     if (chatId && chatId < 0) await captureProtectedId(ctx);
     if (chatId && chatId < 0 && communityTrust !== "full") {
-      if (await holdProtectedHarassment(ctx, text, ctx.message.message_id)) return;
+      if ((await holdProtectedHarassment(ctx, text, ctx.message.message_id) || await holdProjectAccusation(ctx, text, ctx.message.message_id))) return;
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
       if (await holdCryptoAddress(ctx, text, ctx.message.message_id)) return;
