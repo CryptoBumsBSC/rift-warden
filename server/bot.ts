@@ -4336,6 +4336,77 @@ async function holdMarketingPitch(ctx: MyContext, text: string, messageId: numbe
   return true;
 }
 
+
+// === PICTURE SCANNING ===
+// Photos from members who are not admins, owners or trusted are read by an AI
+// model and removed if they look like a scam. Fails open: if the scan errors or
+// times out, the photo stays up. Capped per day so a flood can't run up a bill.
+const IMAGE_SCAN_DAILY_CAP = 200;
+const IMAGE_SCAN_PROMPT = `You check pictures posted in a Telegram community for crypto and NFT scams. Reply with JSON only: {"scam": true or false, "reason": "short reason"}.
+Mark scam true ONLY if the picture clearly shows one of these:
+- a seed phrase or recovery phrase (a list of 12 or 24 words) or a private key
+- a QR code
+- a fake support, admin, team or "official" message or chat asking people to DM, verify, connect or send crypto
+- a fake giveaway, airdrop, presale or "claim" banner or page
+- a wallet-connect or "verify your wallet" page
+- a crypto address presented for people to send funds to
+Mark scam false for everything else: memes, artwork, game screenshots, selfies, ordinary photos, normal screenshots and normal wallet balances.`;
+
+async function scanPhotoForScam(ctx: MyContext): Promise<boolean> {
+  const msg = ctx.message, from = ctx.from, chat = ctx.chat;
+  if (!msg || !msg.photo || !from || !chat || from.is_bot || chat.id >= 0) return false;
+  try {
+    if (await isUserAdmin(ctx, from.id)) return false;
+    const trust = await getCommunityTrustClass(String(from.id), String(chat.id));
+    if (trust === "full" || trust === "trusted") return false;
+
+    const { dateStr } = localParts();
+    const used = await stateIncr(`w:imgscan:${dateStr}`, 36 * 60 * 60);
+    if (used > IMAGE_SCAN_DAILY_CAP) return false;
+
+    // A mid-size version is plenty to read and keeps the cost down.
+    const sizes = msg.photo;
+    const pick = sizes.find(s => s.width >= 800) || sizes[sizes.length - 1];
+    const file = await ctx.api.getFile(pick.file_id);
+    if (!file.file_path) return false;
+    const res = await fetch(`https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`);
+    if (!res.ok) return false;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > 4 * 1024 * 1024) return false;
+    const dataUrl = `data:image/jpeg;base64,${buf.toString("base64")}`;
+
+    const ai = await Promise.race([
+      openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: IMAGE_SCAN_PROMPT },
+          { role: "user", content: [{ type: "image_url", image_url: { url: dataUrl, detail: "low" } }] as any },
+        ],
+        max_tokens: 80,
+      }),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 8000)),
+    ]);
+    if (!ai) return false;
+    const verdict = JSON.parse(ai.choices[0]?.message?.content || "{}") as { scam?: boolean; reason?: string };
+    if (verdict.scam !== true) return false;
+
+    const reason = String(verdict.reason || "scam picture").slice(0, 100);
+    await punishRestrictedContent(ctx, msg.message_id, `image: ${reason}`, "image_scam",
+      `That picture looked like a scam (${reason}). If this was a mistake, ask an admin.`);
+    try {
+      const admins = await ctx.api.getChatAdministrators(chat.id);
+      const mentions = admins.filter(a => !a.user.is_bot && a.user.username).slice(0, 3).map(a => `@${a.user.username}`).join(" ");
+      const who = from.username ? `@${from.username}` : (from.first_name || "A member");
+      if (mentions) await ctx.api.sendMessage(chat.id, `${mentions} — picture from ${who} removed: ${reason}.`);
+    } catch { /* best-effort */ }
+    return true;
+  } catch (e) {
+    console.log("Picture scan failed (allowed through):", e);
+    return false;
+  }
+}
+
 // === BOT SETUP ===
 export function createBot(): Bot<MyContext> {
   const bot = new Bot<MyContext>(BOT_TOKEN!);
@@ -8966,6 +9037,10 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
   bot.on("message:video", async (ctx, next) => {
     const wasSpam = await checkMediaSpam(ctx, ctx.message.video.file_unique_id, "Video");
     if (!wasSpam) await next();
+  });
+  bot.on("message:photo", async (ctx, next) => {
+    const removed = await scanPhotoForScam(ctx);
+    if (!removed) await next();
   });
 
   // Voice note spam detection
