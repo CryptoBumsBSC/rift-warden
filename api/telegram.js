@@ -6274,6 +6274,16 @@ Month Champion: ${monthName} (${monthlyTop.puzzleMonthlyPoints} pts)`;
 
 Usernames can change. This number is what The Warden uses for secure role authority.`);
   });
+  bot.command("userid", async (ctx) => {
+    if (!ctx.from || !isGlobalOwner(ctx)) return;
+    const target = ctx.message?.reply_to_message?.from;
+    if (!target) {
+      await ctx.reply("Reply to the person's message with /userid and I'll show their number.");
+      return;
+    }
+    const label = target.username ? `@${target.username}` : target.first_name || "That member";
+    await ctx.reply(`${label}'s Telegram numeric user ID is: ${target.id}`);
+  });
   bot.command("trustset", async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
     if (ctx.chat.type === "private") return;

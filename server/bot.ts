@@ -6367,6 +6367,19 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     await ctx.reply(`${label}, your Telegram numeric user ID is: ${ctx.from.id}\n\nUsernames can change. This number is what The Warden uses for secure role authority.`);
   });
 
+  // /userid - owner only. Reply to anyone's message with /userid to see their
+  // numeric Telegram ID (needed to set up @TreeFitty and the other mods).
+  bot.command("userid", async (ctx) => {
+    if (!ctx.from || !isGlobalOwner(ctx)) return;
+    const target = ctx.message?.reply_to_message?.from;
+    if (!target) {
+      await ctx.reply("Reply to the person's message with /userid and I'll show their number.");
+      return;
+    }
+    const label = target.username ? `@${target.username}` : (target.first_name || "That member");
+    await ctx.reply(`${label}'s Telegram numeric user ID is: ${target.id}`);
+  });
+
   // === TRUST MANAGEMENT (Owner + @TreeFitty Only) ===
   
   // /trustset — Boss/Community Leader only. Reply with: full | trusted | normal | restricted
