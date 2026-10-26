@@ -4413,6 +4413,7 @@ function createBot() {
     { command: "legal", description: "Legal disclaimers" },
     { command: "safety", description: "Scam and safety reminders" },
     { command: "radio", description: "Open Rift Radio" },
+    { command: "games", description: "Play the Boomerverse arcade" },
     { command: "report", description: "Report a message to the admins" },
     { command: "enter", description: "Enter the active giveaway" },
     { command: "entries", description: "Check giveaway entries" },
@@ -4445,7 +4446,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -4473,6 +4474,25 @@ function createBot() {
     await ctx.reply(
       "RIFT RADIO \u2014 NINE SIGNALS\n\nAmbient, deep space, old-time radio, Australian music, documentary and birdsong. Pick a frequency and leave it running. I won't judge the choice. Much.",
       { reply_markup: { inline_keyboard: [[button]] } }
+    );
+  });
+  bot.command("games", async (ctx) => {
+    const ARCADE = "https://boomerverse-adzz.vercel.app";
+    const GAMES = [
+      ["RIFT CRITTERS", "rift-critters.html"],
+      ["RIFT RUN", "rift-runner.html"],
+      ["RIFT MAZE", "rift-maze.html"],
+      ["BUSH SEARCH", "bush-search.html"],
+      ["SPACE DEFENDER", "space-defender.html"],
+      ["DEVIL CATCH", "devil-catch.html"]
+    ];
+    const isPrivate = ctx.chat?.type === "private";
+    const rows = GAMES.map(([label, file]) => [
+      isPrivate ? { text: label, web_app: { url: `${ARCADE}/${file}` } } : { text: label, url: `${ARCADE}/${file}` }
+    ]);
+    await ctx.reply(
+      "BOOMERVERSE ARCADE \u2014 SIX GAMES\n\nPick one. Scores stay on your own device. " + (isPrivate ? "" : "Open this in a private chat with me to play inside Telegram."),
+      { reply_markup: { inline_keyboard: rows } }
     );
   });
   bot.command("fact", async (ctx) => {
@@ -4969,6 +4989,7 @@ Use /settings to see all toggles.`);
 /characters \u2014 The locked Genesis pieces
 /safety \u2014 How not to get robbed
 /radio \u2014 Open Rift Radio
+/games \u2014 Play the Boomerverse arcade
 /legal \u2014 Legal disclaimers
 
 \u2501\u2501 YOUR PROFILE \u2501\u2501

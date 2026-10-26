@@ -4041,6 +4041,7 @@ export function createBot(): Bot<MyContext> {
     { command: "legal", description: "Legal disclaimers" },
     { command: "safety", description: "Scam and safety reminders" },
     { command: "radio", description: "Open Rift Radio" },
+    { command: "games", description: "Play the Boomerverse arcade" },
     { command: "report", description: "Report a message to the admins" },
     { command: "enter", description: "Enter the active giveaway" },
     { command: "entries", description: "Check giveaway entries" },
@@ -4088,7 +4089,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -4134,6 +4135,31 @@ export function createBot(): Bot<MyContext> {
     await ctx.reply(
       "RIFT RADIO — NINE SIGNALS\n\nAmbient, deep space, old-time radio, Australian music, documentary and birdsong. Pick a frequency and leave it running. I won't judge the choice. Much.",
       { reply_markup: { inline_keyboard: [[button]] } }
+    );
+  });
+
+  // /games - Boomerverse arcade. Same pattern as /radio: Web App buttons in private
+  // chats (play inside Telegram), plain links in groups.
+  bot.command("games", async (ctx) => {
+    const ARCADE = "https://boomerverse-adzz.vercel.app";
+    const GAMES: Array<[string, string]> = [
+      ["RIFT CRITTERS", "rift-critters.html"],
+      ["RIFT RUN", "rift-runner.html"],
+      ["RIFT MAZE", "rift-maze.html"],
+      ["BUSH SEARCH", "bush-search.html"],
+      ["SPACE DEFENDER", "space-defender.html"],
+      ["DEVIL CATCH", "devil-catch.html"],
+    ];
+    const isPrivate = ctx.chat?.type === "private";
+    const rows = GAMES.map(([label, file]) => [
+      isPrivate
+        ? { text: label, web_app: { url: `${ARCADE}/${file}` } }
+        : { text: label, url: `${ARCADE}/${file}` },
+    ]);
+    await ctx.reply(
+      "BOOMERVERSE ARCADE — SIX GAMES\n\nPick one. Scores stay on your own device. " +
+        (isPrivate ? "" : "Open this in a private chat with me to play inside Telegram."),
+      { reply_markup: { inline_keyboard: rows } }
     );
   });
 
@@ -4707,6 +4733,7 @@ _I learn from what works. Use the +1/-1 buttons and I'll get better at this._`,
       `/characters — The locked Genesis pieces\n` +
       `/safety — How not to get robbed\n` +
       `/radio — Open Rift Radio\n` +
+      `/games — Play the Boomerverse arcade\n` +
       `/legal — Legal disclaimers\n\n` +
       `━━ YOUR PROFILE ━━\n` +
       `/myprofile — Your community profile\n` +
