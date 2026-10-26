@@ -6380,6 +6380,26 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     await ctx.reply(`${label}'s Telegram numeric user ID is: ${target.id}`);
   });
 
+  // /pinsafety - owner only. Posts the standard safety notice and pins it.
+  bot.command("pinsafety", async (ctx) => {
+    if (!ctx.from || !ctx.chat || !isGlobalOwner(ctx)) return;
+    if (ctx.chat.id >= 0) { await ctx.reply("Use this in the group."); return; }
+    const sent = await ctx.reply(
+      "SAFETY NOTICE — PLEASE READ\n\n" +
+      "• The Boomerverse team will NEVER DM you first. Anyone who does is a scammer.\n" +
+      "• There is no token. Ignore every presale, airdrop or \"claim\" offer.\n" +
+      "• Never share your seed phrase or private key with anyone, ever.\n" +
+      "• Never connect your wallet to a link someone posts in chat.\n" +
+      "• Only trusted members can post links. If a link looks wrong, don't tap it. Tell an admin.\n" +
+      "• Official links are in the pinned messages only."
+    );
+    try {
+      await ctx.api.pinChatMessage(ctx.chat.id, sent.message_id, { disable_notification: false });
+    } catch {
+      await ctx.reply("Posted, but I couldn't pin it. Make me an admin with the Pin Messages right, then send /pinsafety again.");
+    }
+  });
+
   // === TRUST MANAGEMENT (Owner + @TreeFitty Only) ===
   
   // /trustset — Boss/Community Leader only. Reply with: full | trusted | normal | restricted

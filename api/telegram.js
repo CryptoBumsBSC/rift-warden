@@ -6284,6 +6284,28 @@ Usernames can change. This number is what The Warden uses for secure role author
     const label = target.username ? `@${target.username}` : target.first_name || "That member";
     await ctx.reply(`${label}'s Telegram numeric user ID is: ${target.id}`);
   });
+  bot.command("pinsafety", async (ctx) => {
+    if (!ctx.from || !ctx.chat || !isGlobalOwner(ctx)) return;
+    if (ctx.chat.id >= 0) {
+      await ctx.reply("Use this in the group.");
+      return;
+    }
+    const sent = await ctx.reply(
+      `SAFETY NOTICE \u2014 PLEASE READ
+
+\u2022 The Boomerverse team will NEVER DM you first. Anyone who does is a scammer.
+\u2022 There is no token. Ignore every presale, airdrop or "claim" offer.
+\u2022 Never share your seed phrase or private key with anyone, ever.
+\u2022 Never connect your wallet to a link someone posts in chat.
+\u2022 Only trusted members can post links. If a link looks wrong, don't tap it. Tell an admin.
+\u2022 Official links are in the pinned messages only.`
+    );
+    try {
+      await ctx.api.pinChatMessage(ctx.chat.id, sent.message_id, { disable_notification: false });
+    } catch {
+      await ctx.reply("Posted, but I couldn't pin it. Make me an admin with the Pin Messages right, then send /pinsafety again.");
+    }
+  });
   bot.command("trustset", async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
     if (ctx.chat.type === "private") return;
