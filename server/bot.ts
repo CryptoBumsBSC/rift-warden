@@ -4233,6 +4233,39 @@ async function holdLinkFromUntrusted(ctx: MyContext): Promise<boolean> {
   return true;
 }
 
+
+// Crypto addresses (contracts, tokens, wallets): only admins and owners may post
+// them. Everyone else, trusted members included, has the message removed.
+const ANY_CRYPTO_ADDRESS = /0x[a-fA-F0-9]{40}|\bbc1[a-z0-9]{25,60}\b|\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b|\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/;
+function containsCryptoAddress(text: string): boolean {
+  return ANY_CRYPTO_ADDRESS.test(text || "");
+}
+
+async function holdCryptoAddress(ctx: MyContext, text: string, messageId: number): Promise<boolean> {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot || chat.id >= 0) return false;
+  if (!containsCryptoAddress(text)) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  try { await ctx.api.deleteMessage(chat.id, messageId); } catch {}
+  try {
+    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
+    const who = from.username ? `@${from.username}` : (from.first_name || "A member");
+    if (shouldBan) {
+      await ctx.api.banChatMember(chat.id, from.id);
+      await ctx.api.sendMessage(chat.id, `${who} removed after repeated offences. Contract and wallet addresses are admin-only here.`);
+    } else {
+      await ctx.api.restrictChatMember(chat.id, from.id, { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
+        { until_date: Math.floor(Date.now() / 1000) + muteSeconds });
+      await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). Contract, token and wallet addresses are admin-only in this group. It keeps scammers from slipping fake ones in. Official addresses are in the pinned messages.`);
+    }
+    await logViolation(String(chat.id), String(from.id), from.username || "", "crypto_address", text.slice(0, 120), "address posted by non-admin", shouldBan ? "ban" : "mute");
+    await incrementModStat(String(chat.id), "scamsBlocked");
+  } catch (e) {
+    console.log("Crypto address hold failed:", e);
+  }
+  return true;
+}
+
 // === BOT SETUP ===
 export function createBot(): Bot<MyContext> {
   const bot = new Bot<MyContext>(BOT_TOKEN!);
@@ -7788,7 +7821,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     const hasWalletDrainer = drainerPhrases.some(phrase => lowerText.includes(phrase));
     
     // Check for contract addresses
-    const hasContractAddress = /0x[a-fA-F0-9]{40}/i.test(newText);
+    const hasContractAddress = containsCryptoAddress(newText);
     
     let shouldDelete = false;
     let violationType = "";
@@ -7869,7 +7902,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     const { isScam, flags } = detectScam(caption, username);
     const hasLink = /https?:\/\/|t\.me\/|@\w+/i.test(caption);
     const hasWalletDrainer = ["verify wallet", "sync wallet", "connect wallet urgently"].some(p => lowerCaption.includes(p));
-    const hasContractAddress = /0x[a-fA-F0-9]{40}/i.test(caption);
+    const hasContractAddress = containsCryptoAddress(caption);
     
     let shouldDelete = false;
     let violationType = "";
@@ -8569,6 +8602,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     const chatIdStr = String(chatId);
     const communityTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
     if (communityTrust === "full") { await next(); return; }
+    if (await holdCryptoAddress(ctx, caption, ctx.message.message_id)) return;
     if (communityTrust === "trusted") {
       if (await enforceTrustedLinkContractRules(ctx, caption)) return;
       await next(); return;
@@ -8974,6 +9008,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     if (chatId && chatId < 0 && communityTrust !== "full") {
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
+      if (await holdCryptoAddress(ctx, text, ctx.message.message_id)) return;
       if (communityTrust !== "trusted" && await holdLinkFromUntrusted(ctx)) return;
     }
 

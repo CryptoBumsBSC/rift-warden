@@ -4650,6 +4650,41 @@ async function holdLinkFromUntrusted(ctx) {
   }
   return true;
 }
+var ANY_CRYPTO_ADDRESS = /0x[a-fA-F0-9]{40}|\bbc1[a-z0-9]{25,60}\b|\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b|\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/;
+function containsCryptoAddress(text2) {
+  return ANY_CRYPTO_ADDRESS.test(text2 || "");
+}
+async function holdCryptoAddress(ctx, text2, messageId) {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot || chat.id >= 0) return false;
+  if (!containsCryptoAddress(text2)) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  try {
+    await ctx.api.deleteMessage(chat.id, messageId);
+  } catch {
+  }
+  try {
+    const { muteSeconds, offenseCount, shouldBan } = await addOffense(chat.id, from.id);
+    const who = from.username ? `@${from.username}` : from.first_name || "A member";
+    if (shouldBan) {
+      await ctx.api.banChatMember(chat.id, from.id);
+      await ctx.api.sendMessage(chat.id, `${who} removed after repeated offences. Contract and wallet addresses are admin-only here.`);
+    } else {
+      await ctx.api.restrictChatMember(
+        chat.id,
+        from.id,
+        { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
+        { until_date: Math.floor(Date.now() / 1e3) + muteSeconds }
+      );
+      await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(muteSeconds)} (offence ${offenseCount}). Contract, token and wallet addresses are admin-only in this group. It keeps scammers from slipping fake ones in. Official addresses are in the pinned messages.`);
+    }
+    await logViolation(String(chat.id), String(from.id), from.username || "", "crypto_address", text2.slice(0, 120), "address posted by non-admin", shouldBan ? "ban" : "mute");
+    await incrementModStat(String(chat.id), "scamsBlocked");
+  } catch (e) {
+    console.log("Crypto address hold failed:", e);
+  }
+  return true;
+}
 function createBot() {
   const bot = new Bot(BOT_TOKEN);
   botInstance = bot;
@@ -7717,7 +7752,7 @@ To get a group's chatId, use /communities first.`
     const hasSeedPhrase = detectSeedPhrase(newText);
     const drainerPhrases = ["verify wallet", "sync wallet", "connect wallet urgently", "wallet validation", "claim airdrop"];
     const hasWalletDrainer = drainerPhrases.some((phrase) => lowerText.includes(phrase));
-    const hasContractAddress = /0x[a-fA-F0-9]{40}/i.test(newText);
+    const hasContractAddress = containsCryptoAddress(newText);
     let shouldDelete = false;
     let violationType = "";
     let actionTaken = "";
@@ -7780,7 +7815,7 @@ To get a group's chatId, use /communities first.`
     const { isScam, flags } = detectScam(caption, username);
     const hasLink = /https?:\/\/|t\.me\/|@\w+/i.test(caption);
     const hasWalletDrainer = ["verify wallet", "sync wallet", "connect wallet urgently"].some((p) => lowerCaption.includes(p));
-    const hasContractAddress = /0x[a-fA-F0-9]{40}/i.test(caption);
+    const hasContractAddress = containsCryptoAddress(caption);
     let shouldDelete = false;
     let violationType = "";
     if (isScam && flags.length >= 2 || _editTrust !== "trusted" && hasUnapprovedLink(caption, ctx.editedMessage.caption_entities) || hasWalletDrainer || hasContractAddress) {
@@ -8401,6 +8436,7 @@ I need ban permission to enforce this.`
       await next();
       return;
     }
+    if (await holdCryptoAddress(ctx, caption, ctx.message.message_id)) return;
     if (communityTrust === "trusted") {
       if (await enforceTrustedLinkContractRules(ctx, caption)) return;
       await next();
@@ -8754,6 +8790,7 @@ Admins, please review!`,
     if (chatId && chatId < 0 && communityTrust !== "full") {
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
+      if (await holdCryptoAddress(ctx, text2, ctx.message.message_id)) return;
       if (communityTrust !== "trusted" && await holdLinkFromUntrusted(ctx)) return;
     }
     ctx.session.lastActivityTime = Date.now();
