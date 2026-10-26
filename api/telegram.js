@@ -4470,7 +4470,7 @@ function createBot() {
       await ctx.reply("Rift Radio is fitted, but the station URL is not live yet. Once PUBLIC_URL is set on the deployment, I'll put it on the dial.");
       return;
     }
-    const button = ctx.chat?.type === "private" ? { text: "OPEN RIFT RADIO", web_app: { url: RIFT_RADIO_URL } } : { text: "OPEN RIFT RADIO", url: RIFT_RADIO_URL };
+    const button = { text: "OPEN RIFT RADIO", url: "https://t.me/RiftWardenBot/radio?mode=compact" };
     await ctx.reply(
       "RIFT RADIO \u2014 TWELVE SIGNALS\n\nAmbient, deep space, old-time radio, Australian music, documentary and birdsong. Pick a frequency and leave it running. I won't judge the choice. Much.",
       { reply_markup: { inline_keyboard: [[button]] } }

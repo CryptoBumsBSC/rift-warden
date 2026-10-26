@@ -4128,9 +4128,9 @@ export function createBot(): Bot<MyContext> {
       return;
     }
 
-    const button = ctx.chat?.type === "private"
-      ? { text: "OPEN RIFT RADIO", web_app: { url: RIFT_RADIO_URL } }
-      : { text: "OPEN RIFT RADIO", url: RIFT_RADIO_URL };
+    // Direct-link Mini App (BotFather short name "radio") in compact mode: opens as a
+    // half-height panel over the chat, in private chats and groups alike.
+    const button = { text: "OPEN RIFT RADIO", url: "https://t.me/RiftWardenBot/radio?mode=compact" };
 
     await ctx.reply(
       "RIFT RADIO — TWELVE SIGNALS\n\nAmbient, deep space, old-time radio, Australian music, documentary and birdsong. Pick a frequency and leave it running. I won't judge the choice. Much.",
