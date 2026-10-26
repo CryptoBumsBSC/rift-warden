@@ -4911,13 +4911,14 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
 // Posts accusing the project (Boomerverse) or a protected person (the owner, team) of being a scam, con, fake or fraud are removed.
 // First time per member: removed with a friendly note. After that: the usual mute ladder.
 const PROJPROT_KEY = (chatId: number | string) => `w:projprot:${chatId}`;
+const PROJWORDS_KEY = (chatId: number | string) => `w:projwords:${chatId}`;
 const PROJACCUSE_KEY = (chatId: number | string, uid: number | string) => `w:projaccuse:${chatId}:${uid}`;
 const PROJECT_NAMES_DEFAULT = ["boomerverse", "bvgen", "boomerverse genesis", "rift warden", "rift roll"];
 const PHOMO: Record<string, string> = { "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ѕ": "s", "ј": "j", "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "$": "s", "@": "a", "!": "i" };
 function projNorm(t: string): string {
   return t.normalize("NFKD").replace(/[\u0300-\u036f\u200b-\u200f\u2060\ufeff]/g, "").toLowerCase().replace(/[^\s]/g, ch => PHOMO[ch] ?? ch);
 }
-const PROJ_ACCUSE_RE = /(scam|con\b|conn?ed|conman|con ?artist|rug|ponzi|fraud|fake|thie|stole|steal|liar|lying|lies\b|fleec|rip ?off|ripped|honeypot|pump ?and ?dump|exit ?scam|cash ?grab|sham\b|crook|criminal|dodgy|shonky|bogus|deceiv|swindl|robb|dev ?left|devs? ?(will )?run)/i;
+const PROJ_ACCUSE_RE = /(scam|con\b|conn?ed|conman|con ?artist|rug|ponzi|fraud|fake|thie|stole|steal|liar|lying|lies\b|fleec|rip ?off|ripped|honeypot|pump ?and ?dump|exit ?scam|cash ?grab|sham\b|crook|criminal|dodgy|shonky|bogus|deceiv|swindl|robb|dev ?left|devs? ?(will )?run|abandon|shill|mislead|drain)/i;
 
 async function holdProjectAccusation(ctx: MyContext, text: string, messageId: number): Promise<boolean> {
   const from = ctx.from, chat = ctx.chat, msg = ctx.message ?? ctx.editedMessage;
@@ -4925,7 +4926,9 @@ async function holdProjectAccusation(ctx: MyContext, text: string, messageId: nu
   if (!from || !chat || !msg || from.is_bot || chat.id >= 0) return false;
   if (!(await stateGet<boolean>(PROJPROT_KEY(chat.id), false))) return false;
   const n = projNorm(text), compact = n.replace(/[^a-z]/g, "");
-  if (!PROJ_ACCUSE_RE.test(n) && !PROJ_ACCUSE_RE.test(compact)) return false;
+  const extraWords = await stateGet<string[]>(PROJWORDS_KEY(chat.id), []);
+  const extraHit = extraWords.some(w => { const x = projNorm(w); return n.includes(x) || compact.includes(x.replace(/[^a-z]/g, "")); });
+  if (!PROJ_ACCUSE_RE.test(n) && !PROJ_ACCUSE_RE.test(compact) && !extraHit) return false;
   const people = await getProtected(chat.id);
   // Protected people and admins may say what they like.
   if (people.some(p => (p.id && p.id === String(from.id)) || (p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase()))) return false;
@@ -5057,7 +5060,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -7249,6 +7252,31 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     } else { await privateOwnerReply(ctx, "Usage: reply to their message with /protect, or /protect @username"); return; }
     await saveProtected(ctx.chat.id, list);
     await privateOwnerReply(ctx, "Added to the protected list. Anyone who targets them with insults or put-downs will be removed and muted. Only the owners and approved managers can see or change this list.");
+  });
+
+  bot.command("words", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const list = await stateGet<string[]>(PROJWORDS_KEY(ctx.chat.id), []);
+    await privateOwnerReply(ctx, "Built-in words: scam, con, fraud, fake, rug, ponzi, thief, liar, rip off, crook, shill, and more.\n\n" +
+      (list.length ? "Your extra words: " + list.join(", ") : "You have no extra words yet.") +
+      "\n\nAdd one: /addword grifter\nRemove one: /removeword grifter\nA word only matters when a message also names the project or a protected person, and the AI agrees it is an accusation. This only works while /projectprotect is on.");
+  });
+  bot.command("addword", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const w = (ctx.match || "").toString().trim().toLowerCase().slice(0, 40);
+    if (w.replace(/[^a-z0-9]/gi, "").length < 3) { await privateOwnerReply(ctx, "Use: /addword word (at least 3 letters). Example: /addword grifter"); return; }
+    const list = await stateGet<string[]>(PROJWORDS_KEY(ctx.chat.id), []);
+    if (list.length >= 100) { await privateOwnerReply(ctx, "You have 100 extra words, which is the limit. Remove one first."); return; }
+    if (!list.includes(w)) list.push(w);
+    await stateSet(PROJWORDS_KEY(ctx.chat.id), list, 5 * 365 * 24 * 60 * 60);
+    await privateOwnerReply(ctx, `Added "${w}". Messages with it that name the project or a protected person will now be checked.`);
+  });
+  bot.command("removeword", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const w = (ctx.match || "").toString().trim().toLowerCase();
+    const list = (await stateGet<string[]>(PROJWORDS_KEY(ctx.chat.id), [])).filter(x => x !== w);
+    await stateSet(PROJWORDS_KEY(ctx.chat.id), list, 5 * 365 * 24 * 60 * 60);
+    await privateOwnerReply(ctx, `Removed "${w}" from your extra words. The built-in words stay.`);
   });
 
   bot.command("projectprotect", async (ctx) => {
