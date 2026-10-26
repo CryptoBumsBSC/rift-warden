@@ -6866,7 +6866,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     if (!ctx.chat || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
     const named = (ctx.match || "").toString().trim();
     // Naming a species is an owner-only extra: /wildlife tasmanian devil
-    if (named && !isGlobalOwner(ctx)) { await ctx.reply("Only the owner can pick a species. Admins can use /wildlife on its own for a random one."); return; }
+    if (named && !canManageCommunityTrust(ctx)) { await ctx.reply("Only the owners (@aussieboomer and @TreeFitty) can pick a species. Admins can use /wildlife on its own for a random one."); return; }
     const ok = await postWildlife(ctx.api, ctx.chat.id, named || undefined);
     if (!ok) await ctx.reply(named
       ? `I couldn't build a post for "${named}". It may not be found in Australia, or has no free-to-share photo. Try the common or scientific name.`

@@ -6890,8 +6890,8 @@ Usernames can change. This number is what The Warden uses for secure role author
   bot.command("wildlife", async (ctx) => {
     if (!ctx.chat || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
     const named = (ctx.match || "").toString().trim();
-    if (named && !isGlobalOwner(ctx)) {
-      await ctx.reply("Only the owner can pick a species. Admins can use /wildlife on its own for a random one.");
+    if (named && !canManageCommunityTrust(ctx)) {
+      await ctx.reply("Only the owners (@aussieboomer and @TreeFitty) can pick a species. Admins can use /wildlife on its own for a random one.");
       return;
     }
     const ok = await postWildlife(ctx.api, ctx.chat.id, named || void 0);
