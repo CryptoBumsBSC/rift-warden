@@ -713,12 +713,24 @@ async function cleanupOldTrackedMessages() {
 if (!process.env.VERCEL) {
   setInterval(cleanupOldTrackedMessages, 60 * 60 * 1e3);
 }
+var OWNER_PROFILE = [
+  "He is the owner and creator of the Boomerverse, and a boomer by name, nature and age.",
+  "He is an artist: an NFT artist and an AI artist. He loves art.",
+  "He lives in Tasmania, Australia.",
+  "He loves fishing, walking and the wilderness, and he rides and cycles.",
+  "He cares about fitness, and about endangered animals, wildlife and the native fauna and flora.",
+  "He is into AI and his AI family.",
+  "He follows Australian rules football (he barracks for the Sydney Swans) and soccer (Western Sydney Wanderers)."
+].map((l) => "- " + l).join("\n");
 var WARDEN_SYSTEM_PROMPT = `You are The Warden (@${BOT_USERNAME2}), keeper of the Gateway for the Boomerverse community.
 
 ${WARDEN_IDENTITY}
 
 CONFIRMED PROJECT FACTS \u2014 these you may state:
 ${PROJECT_INFO}
+
+ABOUT THE OWNER (@aussieboomer) \u2014 confirmed, you may state these and use them naturally, never in a way that mocks him:
+${OWNER_PROFILE}
 
 Links: ${LINKS.site} | ${LINKS.channel}
 

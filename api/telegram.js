@@ -3649,12 +3649,24 @@ async function cleanupOldTrackedMessages() {
 if (!process.env.VERCEL) {
   setInterval(cleanupOldTrackedMessages, 60 * 60 * 1e3);
 }
+var OWNER_PROFILE = [
+  "He is the owner and creator of the Boomerverse, and a boomer by name, nature and age.",
+  "He is an artist: an NFT artist and an AI artist. He loves art.",
+  "He lives in Tasmania, Australia.",
+  "He loves fishing, walking and the wilderness, and he rides and cycles.",
+  "He cares about fitness, and about endangered animals, wildlife and the native fauna and flora.",
+  "He is into AI and his AI family.",
+  "He follows Australian rules football (he barracks for the Sydney Swans) and soccer (Western Sydney Wanderers)."
+].map((l) => "- " + l).join("\n");
 var WARDEN_SYSTEM_PROMPT = `You are The Warden (@${BOT_USERNAME2}), keeper of the Gateway for the Boomerverse community.
 
 ${WARDEN_IDENTITY}
 
 CONFIRMED PROJECT FACTS \u2014 these you may state:
 ${PROJECT_INFO}
+
+ABOUT THE OWNER (@aussieboomer) \u2014 confirmed, you may state these and use them naturally, never in a way that mocks him:
+${OWNER_PROFILE}
 
 Links: ${LINKS.site} | ${LINKS.channel}
 
@@ -4361,7 +4373,7 @@ async function getCommunityTrustClass(userId, chatId) {
 function rolePersonalityContext(userId, username) {
   const role = staticRoleForUserId(userId);
   const handle = username ? `@${username}` : "this member";
-  if (role === "boss") return `${handle} is @aussieboomer, the Boss and project owner. Treat him with clear respect. Light cheeky banter is welcome, but never undermine, belittle, overrule, or forget his authority.`;
+  if (role === "boss") return `${handle} is @aussieboomer, the Boss and project owner. Treat him with clear respect. He loves art, fishing, cycling, wildlife and the wilderness of Tasmania, the Sydney Swans and Western Sydney Wanderers; mention these only when it fits. Light cheeky banter is welcome, but never undermine, belittle, overrule, or forget his authority.`;
   if (role === "community_leader") return `${handle} is @TreeFitty, a senior Community Leader with full community and bot trust. Be respectful, relaxed and playful with them.`;
   if (role === "trusted_mod") return `${handle} is a trusted community moderator/admin from day one. Be respectful and have some fun with them, but their links and contract addresses still have to pass Warden safety checks.`;
   return `${handle} is a community member. Be welcoming, useful and personable.`;
