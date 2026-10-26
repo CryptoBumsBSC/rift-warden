@@ -8786,7 +8786,8 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
   // New members can't post pictures or video in their first hour. This stops
   // drive-by spam and scam-image raids without keeping anyone out for long.
   const NEW_MEMBER_MEDIA_HOURS = 1;
-  bot.on(["message:photo", "message:video", "message:animation", "message:video_note"], async (ctx, next) => {
+  // GIFs are allowed for everyone from the first minute (repeat-post and caption checks still apply).
+  bot.on(["message:photo", "message:video", "message:video_note"], async (ctx, next) => {
     const chatId = ctx.chat?.id;
     const from = ctx.from;
     if (!chatId || chatId >= 0 || !from || from.is_bot) { await next(); return; }

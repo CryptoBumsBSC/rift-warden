@@ -8479,7 +8479,7 @@ I need ban permission to enforce this.`
     }
   });
   const NEW_MEMBER_MEDIA_HOURS = 1;
-  bot.on(["message:photo", "message:video", "message:animation", "message:video_note"], async (ctx, next) => {
+  bot.on(["message:photo", "message:video", "message:video_note"], async (ctx, next) => {
     const chatId = ctx.chat?.id;
     const from = ctx.from;
     if (!chatId || chatId >= 0 || !from || from.is_bot) {
