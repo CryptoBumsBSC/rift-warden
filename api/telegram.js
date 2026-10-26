@@ -7754,7 +7754,8 @@ To get a group's chatId, use /communities first.`
       if (!member.is_bot && isFirstCommunityJoin) {
         await ensureTrustRecord(newMemberId, chatIdStr, username, member.first_name || name);
       }
-      const launchTrusted = launchRole === "boss" || launchRole === "community_leader" || launchRole === "trusted_mod";
+      const vipInvited = !member.is_bot && Boolean(await stateGet(`w:vipjoin:${chatIdStr}:${newMemberId}`, false));
+      const launchTrusted = launchRole === "boss" || launchRole === "community_leader" || launchRole === "trusted_mod" || vipInvited;
       const _earlyFeats = await getFeatureSettings(chatIdStr);
       if (member.is_bot && member.id !== ctx.me.id) {
         const addedByOwner = canManageExtraBots(ctx);
@@ -8169,6 +8170,57 @@ Tap the button below to confirm you're a real person. You have 10 minutes \u2014
     } catch {
       await ctx.answerCallbackQuery({ text: "Verification failed \u2014 please ask an admin to restore your permissions.", show_alert: true });
     }
+  });
+  bot.on("chat_member", async (ctx, next) => {
+    try {
+      const u = ctx.chatMember;
+      const link = u?.invite_link;
+      if (u && link && /^trusted/i.test(link.name || "") && !u.new_chat_member.user.is_bot) {
+        const joined = u.new_chat_member.status === "member" && (u.old_chat_member.status === "left" || u.old_chat_member.status === "kicked");
+        if (joined) {
+          const chatId = ctx.chat.id, chatIdStr = String(chatId);
+          const member = u.new_chat_member.user, memberId = String(member.id);
+          const creatorId = link.creator?.id;
+          let creatorOk = false;
+          if (creatorId && staticRoleForUserId(creatorId) === "boss") creatorOk = true;
+          if (creatorOk) {
+            await ensureTrustRecord(memberId, chatIdStr, member.username, member.first_name);
+            await db.update(trustScores).set({
+              trustStatus: "vouched",
+              isTrusted: true,
+              trustLevel: 2,
+              isEligible: true,
+              vouchedBy: String(creatorId),
+              vouchedAt: /* @__PURE__ */ new Date()
+            }).where(and(eq2(trustScores.telegramUserId, memberId), eq2(trustScores.chatId, chatIdStr)));
+            await stateSet(`w:vipjoin:${chatIdStr}:${memberId}`, true, 15 * 60);
+            const pending = await stateGet(KEYS.captcha(chatId, member.id), null);
+            if (pending) {
+              await stateDel(KEYS.captcha(chatId, member.id));
+              try {
+                await ctx.api.restrictChatMember(chatId, member.id, {
+                  can_send_messages: true,
+                  can_send_audios: true,
+                  can_send_documents: true,
+                  can_send_photos: true,
+                  can_send_videos: true,
+                  can_send_video_notes: true,
+                  can_send_voice_notes: true,
+                  can_send_polls: true,
+                  can_send_other_messages: true,
+                  can_add_web_page_previews: true
+                });
+              } catch {
+              }
+            }
+            await logViolation(chatIdStr, memberId, member.username || "", "trusted_invite", link.name || "", "Joined via trusted invite link; vouched", "allow");
+          }
+        }
+      }
+    } catch (e) {
+      console.log("Trusted invite handling failed:", e);
+    }
+    await next();
   });
   bot.on("chat_member", async (ctx) => {
     const update = ctx.chatMember;
