@@ -6,7 +6,8 @@
   "functions": {
     "api/telegram.js": { "maxDuration": 60, "memory": 1024 },
     "api/cron.js": { "maxDuration": 300, "memory": 1024 },
-    "api/admin.js": { "maxDuration": 30, "memory": 1024 }
+    "api/admin.js": { "maxDuration": 30, "memory": 1024 },
+    "api/wildlife.js": { "maxDuration": 60, "memory": 1024 }
   },
   "crons": [
     { "path": "/api/cron", "schedule": "*/5 * * * *" }
@@ -15,6 +16,7 @@
     { "source": "/api/telegram", "destination": "/api/telegram" },
     { "source": "/api/cron", "destination": "/api/cron" },
     { "source": "/api/set-webhook", "destination": "/api/set-webhook" },
+    { "source": "/api/wildlife", "destination": "/api/wildlife" },
     { "source": "/api/(.*)", "destination": "/api/admin" },
     { "source": "/health", "destination": "/api/admin" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
