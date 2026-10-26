@@ -6,7 +6,7 @@ import { type Community as CommunityDbRow, communityProfiles, memberScores, user
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { generateImageBuffer } from "./imageGen";
 import * as RiftLore from "./riftLore";
-import { stateGet, stateSet, stateDel, stateUpdate, stateScan, KEYS, TTL } from "./state";
+import { stateGet, stateSet, stateDel, stateUpdate, stateIncr, stateScan, KEYS, TTL } from "./state";
 import {
   detectFakeVerificationBot, detectDomainImpersonation, detectMintBait,
   isSuspiciousBotName, detectAdminCompromise, hasHomoglyphs,
@@ -4352,6 +4352,8 @@ export function createBot(): Bot<MyContext> {
     { command: "safety", description: "Scam and safety reminders" },
     { command: "radio", description: "Open Rift Radio" },
     { command: "games", description: "Play the Boomerverse arcade" },
+    { command: "rules", description: "The group rules" },
+    { command: "faq", description: "Common questions answered" },
     { command: "report", description: "Report a message to the admins" },
     { command: "enter", description: "Enter the active giveaway" },
     { command: "entries", description: "Check giveaway entries" },
@@ -4399,7 +4401,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -4448,6 +4450,34 @@ export function createBot(): Bot<MyContext> {
     );
   };
   bot.command("radio", sendRadio);
+
+  // /rules and /faq - short, same answer every time.
+  bot.command("rules", async (ctx) => {
+    await ctx.reply(
+      "GROUP RULES\n\n" +
+      "1. Be decent. No abuse, hate or harassment.\n" +
+      "2. No scams, spam or flooding.\n" +
+      "3. Links and pictures: new members wait. Links are for trusted members only.\n" +
+      "4. No contract, token or wallet addresses. Admins only.\n" +
+      "5. No promos, marketing or ads. Business talk happens in a voice chat with the admins.\n" +
+      "6. The team will NEVER DM you first. There is no token. Never share your seed phrase.\n" +
+      "7. Rule-breakers get muted first, then banned if it keeps happening.\n" +
+      "8. See something wrong? Reply to it with /report."
+    );
+  });
+
+  bot.command("faq", async (ctx) => {
+    await ctx.reply(
+      "FAQ\n\n" +
+      "What is Boomerverse? An Australian collectible universe on Base. Genesis is 333 pieces. /info has the full story.\n\n" +
+      "Is there a token? No. Ignore every presale, airdrop and \"claim\" offer.\n\n" +
+      "Why was my message deleted? Links, addresses, ads and a few words are restricted. /rules lists them.\n\n" +
+      "How do I become trusted? Stay 7 days, write at least 5 real messages and keep a clean record. An admin can also trust you.\n\n" +
+      "How do I report something? Reply to the message and send /report.\n\n" +
+      "Where are the official links? In the pinned messages only.\n\n" +
+      "What else can I do here? /radio for music, /games for the arcade, or tag me and ask."
+    );
+  });
 
   // /games - Boomerverse arcade. Same pattern as /radio: Web App buttons in private
   // chats (play inside Telegram), plain links in groups.
@@ -4699,6 +4729,18 @@ Everything else in the 333 is provisional. I won't describe a piece before it's 
 
     const chatIdStr = ctx.chat.id.toString();
     const offender = target.from;
+
+    // Reports can't be used as a weapon: admins and owners can't be reported away,
+    // and one person can file only 5 reports an hour.
+    if (offender && (await isUserAdmin(ctx, offender.id) || (await getCommunityTrustClass(String(offender.id), chatIdStr)) === "full")) {
+      await ctx.reply("Admins and owners can't be reported this way. If something is wrong, message an admin directly.");
+      return;
+    }
+    const reportCount = await stateIncr(`w:reports:${chatIdStr}:${ctx.from.id}`, 60 * 60);
+    if (reportCount > 5) {
+      await ctx.reply("That's a lot of reports in an hour. Please message an admin directly.");
+      return;
+    }
 
     // Remove first, ask questions after. If it turns out to be fine, an admin
     // can say so. If it isn't, every second it stays up matters.
@@ -11201,6 +11243,43 @@ async function reportMissingPermissions(bot: Bot<MyContext>, chatId: number): Pr
  * One cron invocation. Safe to call as often as you like — every task
  * decides for itself whether it is due.
  */
+
+// One message each morning to the owner: what the Warden blocked in the last 24 hours.
+async function sendSafetyDigest(bot: Bot<MyContext>): Promise<void> {
+  if (!GLOBAL_OWNER_USER_ID) return;
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const byType = await db.select({
+    type: violationLogs.violationType,
+    action: violationLogs.actionTaken,
+    n: sql<number>`count(*)::int`,
+  }).from(violationLogs).where(gte(violationLogs.createdAt, since))
+    .groupBy(violationLogs.violationType, violationLogs.actionTaken)
+    .orderBy(desc(sql`count(*)`));
+  const top = await db.select({
+    user: violationLogs.username,
+    id: violationLogs.userId,
+    n: sql<number>`count(*)::int`,
+  }).from(violationLogs).where(gte(violationLogs.createdAt, since))
+    .groupBy(violationLogs.username, violationLogs.userId)
+    .orderBy(desc(sql`count(*)`)).limit(3);
+
+  const total = byType.reduce((a, r) => a + Number(r.n), 0);
+  let text: string;
+  if (total === 0) {
+    text = "THE WARDEN: DAILY SAFETY REPORT\n\nQuiet 24 hours. Nothing blocked, nobody muted or banned.";
+  } else {
+    const lines = byType.slice(0, 10).map(r => `• ${r.type.replace(/_/g, " ")} (${r.action || "logged"}): ${r.n}`);
+    const offenders = top.map(r => `• ${r.user ? "@" + r.user : r.id}: ${r.n}`);
+    text = `THE WARDEN: DAILY SAFETY REPORT\n\nLast 24 hours: ${total} actions.\n\n${lines.join("\n")}` +
+      (offenders.length ? `\n\nMost active offenders:\n${offenders.join("\n")}` : "");
+  }
+  try {
+    await bot.api.sendMessage(Number(GLOBAL_OWNER_USER_ID), text);
+  } catch (e) {
+    console.log("Safety digest couldn't be delivered (owner may need to message the bot once):", e);
+  }
+}
+
 export async function runCronTick(): Promise<{ ran: string[] }> {
   const ran: string[] = [];
   const bot = createBot();
@@ -11227,6 +11306,7 @@ export async function runCronTick(): Promise<{ ran: string[] }> {
 
   // Daily
   const before = ran.length;
+  await onceDaily("safety-digest", 8, async () => { await sendSafetyDigest(bot); ran.push("safety-digest"); });
   await onceDaily("quote", 10, async () => { await postDailyQuote(); ran.push("daily-quote"); });
   await onceDaily("birthdays", 9, async () => { await checkBirthdays(); ran.push("birthdays"); });
   await onceDaily("winners-daily", 20, async () => { await announceWinners("daily"); ran.push("winners-daily"); });

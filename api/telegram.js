@@ -4665,6 +4665,8 @@ function createBot() {
     { command: "safety", description: "Scam and safety reminders" },
     { command: "radio", description: "Open Rift Radio" },
     { command: "games", description: "Play the Boomerverse arcade" },
+    { command: "rules", description: "The group rules" },
+    { command: "faq", description: "Common questions answered" },
     { command: "report", description: "Report a message to the admins" },
     { command: "enter", description: "Enter the active giveaway" },
     { command: "entries", description: "Check giveaway entries" },
@@ -4697,7 +4699,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -4728,6 +4730,16 @@ function createBot() {
     );
   };
   bot.command("radio", sendRadio);
+  bot.command("rules", async (ctx) => {
+    await ctx.reply(
+      "GROUP RULES\n\n1. Be decent. No abuse, hate or harassment.\n2. No scams, spam or flooding.\n3. Links and pictures: new members wait. Links are for trusted members only.\n4. No contract, token or wallet addresses. Admins only.\n5. No promos, marketing or ads. Business talk happens in a voice chat with the admins.\n6. The team will NEVER DM you first. There is no token. Never share your seed phrase.\n7. Rule-breakers get muted first, then banned if it keeps happening.\n8. See something wrong? Reply to it with /report."
+    );
+  });
+  bot.command("faq", async (ctx) => {
+    await ctx.reply(
+      'FAQ\n\nWhat is Boomerverse? An Australian collectible universe on Base. Genesis is 333 pieces. /info has the full story.\n\nIs there a token? No. Ignore every presale, airdrop and "claim" offer.\n\nWhy was my message deleted? Links, addresses, ads and a few words are restricted. /rules lists them.\n\nHow do I become trusted? Stay 7 days, write at least 5 real messages and keep a clean record. An admin can also trust you.\n\nHow do I report something? Reply to the message and send /report.\n\nWhere are the official links? In the pinned messages only.\n\nWhat else can I do here? /radio for music, /games for the arcade, or tag me and ask.'
+    );
+  });
   const sendGames = async (ctx) => {
     const ARCADE = "https://boomerverse-adzz.vercel.app";
     const GAMES = [
@@ -4919,6 +4931,15 @@ Birthday: ${p.birthday}`;
     }
     const chatIdStr = ctx.chat.id.toString();
     const offender = target.from;
+    if (offender && (await isUserAdmin(ctx, offender.id) || await getCommunityTrustClass(String(offender.id), chatIdStr) === "full")) {
+      await ctx.reply("Admins and owners can't be reported this way. If something is wrong, message an admin directly.");
+      return;
+    }
+    const reportCount = await stateIncr(`w:reports:${chatIdStr}:${ctx.from.id}`, 60 * 60);
+    if (reportCount > 5) {
+      await ctx.reply("That's a lot of reports in an hour. Please message an admin directly.");
+      return;
+    }
     let removed = false;
     try {
       await ctx.api.deleteMessage(ctx.chat.id, target.message_id);
