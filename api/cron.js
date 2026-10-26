@@ -4781,6 +4781,7 @@ async function recheckNameImpersonation(ctx) {
       adminUsernames = admins.filter((a) => !a.user.is_bot && a.user.username).map((a) => a.user.username);
       adminCache.set(String(chat.id), { usernames: adminUsernames, lastUpdated: Date.now() });
     } else adminUsernames = cached.usernames;
+    adminUsernames = [...adminUsernames, ...(await getProtected(chat.id)).map((p) => p.username).filter((u) => !!u)];
     const display = `${from.first_name || ""}${from.last_name || ""}`.replace(/\s+/g, "");
     const hit = (from.username ? checkAdminImpersonation(from.username, adminUsernames) : null)?.isImpersonation ? checkAdminImpersonation(from.username, adminUsernames) : display.length >= 6 ? checkAdminImpersonation(display, adminUsernames) : null;
     const officialish = /\b(admin|administrator|support|official|moderator|helpdesk|boomerverse|warden)\b/i.test(`${from.first_name || ""} ${from.last_name || ""}`);
@@ -5325,6 +5326,86 @@ async function postWildlife(api, chatId, named) {
   return true;
 }
 var WILDLIFE_CFG = (chatId) => `w:wildlife:cfg:${chatId}`;
+var PROTECTED_KEY = (chatId) => `w:protected:${chatId}`;
+var PROTECTED_DEFAULT = [{ username: "RealAshleyWard", label: "@RealAshleyWard" }];
+async function getProtected(chatId) {
+  return await stateGet(PROTECTED_KEY(chatId), PROTECTED_DEFAULT);
+}
+async function saveProtected(chatId, list) {
+  await stateSet(PROTECTED_KEY(chatId), list, 5 * 365 * 24 * 60 * 60);
+}
+async function captureProtectedId(ctx) {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || chat.id >= 0 || !from.username) return;
+  const list = await getProtected(chat.id);
+  const hit = list.find((p) => !p.id && p.username && p.username.toLowerCase() === from.username.toLowerCase());
+  if (!hit) return;
+  hit.id = String(from.id);
+  await saveProtected(chat.id, list);
+}
+var PROTECTED_MUTE_STEP = 1;
+async function holdProtectedHarassment(ctx, text2, messageId) {
+  const from = ctx.from, chat = ctx.chat, msg = ctx.message;
+  if (!from || !chat || !msg || from.is_bot || chat.id >= 0) return false;
+  const list = await getProtected(chat.id);
+  if (!list.length) return false;
+  if (list.some((p) => p.id && p.id === String(from.id) || p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase())) return false;
+  const lower = text2.toLowerCase();
+  const repliedTo = msg.reply_to_message?.from;
+  const targeted = list.find(
+    (p) => repliedTo && (p.id && p.id === String(repliedTo.id) || p.username && repliedTo.username && p.username.toLowerCase() === repliedTo.username.toLowerCase()) || p.username && lower.includes("@" + p.username.toLowerCase()) || p.id && (msg.entities || []).some((e) => e.type === "text_mention" && String(e.user?.id) === p.id)
+  );
+  if (!targeted) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  let hostile = false, reason = "";
+  try {
+    const ai = await openai3.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: 'You protect a community member from being picked on. Decide if the message below, which is aimed at that member, is hostile: insults, mockery, put-downs, sarcasm meant to demean, harassment, sexual remarks, threats, dismissing or belittling them, or stirring others up against them. Friendly or neutral messages, questions and compliments are NOT hostile. Reply JSON only: {"hostile": true or false, "reason": "short reason"}.' },
+        { role: "user", content: text2.slice(0, 1200) }
+      ],
+      max_tokens: 60
+    });
+    const v = JSON.parse(ai.choices[0]?.message?.content || "{}");
+    hostile = v.hostile === true;
+    reason = String(v.reason || "hostile toward a protected member").slice(0, 100);
+  } catch {
+    return false;
+  }
+  if (!hostile) return false;
+  try {
+    await ctx.api.deleteMessage(chat.id, messageId);
+  } catch {
+  }
+  try {
+    let r = await addOffense(chat.id, from.id);
+    if (!r.shouldBan && r.offenseCount <= PROTECTED_MUTE_STEP) r = await addOffense(chat.id, from.id);
+    const who = from.username ? `@${from.username}` : from.first_name || "A member";
+    if (r.shouldBan) {
+      await ctx.api.banChatMember(chat.id, from.id);
+      await ctx.api.sendMessage(chat.id, `${who} removed. Keep it kind in here.`);
+    } else {
+      await ctx.api.restrictChatMember(
+        chat.id,
+        from.id,
+        { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
+        { until_date: Math.floor(Date.now() / 1e3) + r.muteSeconds }
+      );
+      await ctx.api.sendMessage(
+        chat.id,
+        `${who} muted for ${formatDuration(r.muteSeconds)}. Keep it kind in here.`,
+        { reply_markup: { inline_keyboard: [[{ text: "Think this is a mistake? Ask admins", callback_data: `appeal:${from.id}` }]] } }
+      );
+    }
+    await logViolation(String(chat.id), String(from.id), from.username || "", "protected_member", text2.slice(0, 120), `Aimed at ${targeted.label}: ${reason}`, r.shouldBan ? "ban" : "mute");
+    await incrementModStat(String(chat.id), "messagesBlocked");
+  } catch (e) {
+    console.log("Protected-member hold failed:", e);
+  }
+  return true;
+}
 function createBot() {
   const bot = new Bot(BOT_TOKEN);
   botInstance = bot;
@@ -5372,7 +5453,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -7133,6 +7214,39 @@ Use /wildlifeauto daily (every day at noon), /wildlifeauto twice (Tuesday and Sa
     }
     await stateSet(WILDLIFE_CFG(ctx.chat.id), v, 5 * 365 * 24 * 60 * 60);
     await ctx.reply(`Wildlife posts set to: ${v}.`);
+  });
+  bot.command("protect", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageCommunityTrust(ctx)) return;
+    const list = await getProtected(ctx.chat.id);
+    const replied = ctx.message?.reply_to_message?.from;
+    const arg = (ctx.match || "").toString().trim().replace(/^@/, "");
+    if (replied && !replied.is_bot) {
+      const existing = list.find((p) => p.id === String(replied.id) || p.username && replied.username && p.username.toLowerCase() === replied.username.toLowerCase());
+      if (existing) {
+        existing.id = String(replied.id);
+        if (replied.username) existing.username = replied.username;
+      } else list.push({ id: String(replied.id), username: replied.username, label: replied.username ? `@${replied.username}` : replied.first_name || String(replied.id) });
+    } else if (/^\w{4,32}$/.test(arg)) {
+      if (!list.some((p) => p.username && p.username.toLowerCase() === arg.toLowerCase())) list.push({ username: arg, label: `@${arg}` });
+    } else {
+      await ctx.reply("Usage: reply to their message with /protect, or /protect @username");
+      return;
+    }
+    await saveProtected(ctx.chat.id, list);
+    await ctx.reply("Added to the protected list. Anyone who targets them with insults or put-downs will be removed and muted.");
+  });
+  bot.command("unprotect", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageCommunityTrust(ctx)) return;
+    const replied = ctx.message?.reply_to_message?.from;
+    const arg = (ctx.match || "").toString().trim().replace(/^@/, "").toLowerCase();
+    const list = (await getProtected(ctx.chat.id)).filter((p) => !(replied && p.id === String(replied.id) || arg && p.username && p.username.toLowerCase() === arg));
+    await saveProtected(ctx.chat.id, list);
+    await ctx.reply("Removed from the protected list.");
+  });
+  bot.command("protected", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
+    const list = await getProtected(ctx.chat.id);
+    await ctx.reply(list.length ? "PROTECTED MEMBERS\n\n" + list.map((p) => `\u2022 ${p.label}${p.id ? " (ID saved)" : " (waiting for them to join or post)"}`).join("\n") : "Nobody on the protected list.");
   });
   bot.command("log", async (ctx) => {
     if (!ctx.chat || !ctx.from || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
@@ -8895,6 +9009,7 @@ You'll be able to chat once lockdown ends.`
           } else {
             adminUsernames = cached.usernames;
           }
+          adminUsernames = [...adminUsernames, ...(await getProtected(chatId)).map((p) => p.username).filter((u) => !!u)];
           const impersonationCheck = checkAdminImpersonation(username, adminUsernames);
           if (impersonationCheck.isImpersonation) {
             const { muteSeconds, offenseCount, shouldBan } = await addOffense(chatId, member.id, true);
@@ -9693,7 +9808,9 @@ Admins, please review!`,
     const communityTrust = chatId && chatId < 0 && ctx.from?.id ? await getCommunityTrustClass(String(ctx.from.id), String(chatId)) : "normal";
     const hasFullCommunityTrust = communityTrust === "full";
     const hasTrustedCommunityTrust = communityTrust === "trusted";
+    if (chatId && chatId < 0) await captureProtectedId(ctx);
     if (chatId && chatId < 0 && communityTrust !== "full") {
+      if (await holdProtectedHarassment(ctx, text2, ctx.message.message_id)) return;
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
       if (await holdCryptoAddress(ctx, text2, ctx.message.message_id)) return;
