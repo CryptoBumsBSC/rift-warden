@@ -6878,7 +6878,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     if (!ctx.chat || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
     const v = (ctx.match || "").toString().trim().toLowerCase();
     if (!["daily", "twice", "off"].includes(v)) {
-      const cur = await stateGet<string>(WILDLIFE_CFG(ctx.chat.id), "off");
+      const cur = await stateGet<string>(WILDLIFE_CFG(ctx.chat.id), "daily");
       await ctx.reply(`Wildlife posts are: ${cur}.\nUse /wildlifeauto daily (every day at noon), /wildlifeauto twice (Tuesday and Saturday at noon) or /wildlifeauto off.`);
       return;
     }
@@ -11823,7 +11823,7 @@ export async function runCronTick(): Promise<{ ran: string[] }> {
   const { weekday } = localParts();
   await onceDaily("wildlife", 12, async () => {
     for (const chatId of Array.from(activeChats)) {
-      const cfg = await stateGet<string>(WILDLIFE_CFG(chatId), "off");
+      const cfg = await stateGet<string>(WILDLIFE_CFG(chatId), "daily");
       if (cfg === "off") continue;
       if (cfg === "twice" && weekday !== "Tue" && weekday !== "Sat") continue;
       try { if (await postWildlife(bot.api, chatId)) ran.push(`wildlife:${chatId}`); } catch (e) { console.log("Wildlife cron failed:", e); }

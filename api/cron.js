@@ -7126,7 +7126,7 @@ Usernames can change. This number is what The Warden uses for secure role author
     if (!ctx.chat || ctx.chat.id >= 0 || !await canRunAdminCmd(ctx)) return;
     const v = (ctx.match || "").toString().trim().toLowerCase();
     if (!["daily", "twice", "off"].includes(v)) {
-      const cur = await stateGet(WILDLIFE_CFG(ctx.chat.id), "off");
+      const cur = await stateGet(WILDLIFE_CFG(ctx.chat.id), "daily");
       await ctx.reply(`Wildlife posts are: ${cur}.
 Use /wildlifeauto daily (every day at noon), /wildlifeauto twice (Tuesday and Saturday at noon) or /wildlifeauto off.`);
       return;
@@ -12233,7 +12233,7 @@ async function runCronTick() {
   const { weekday } = localParts();
   await onceDaily("wildlife", 12, async () => {
     for (const chatId of Array.from(activeChats)) {
-      const cfg = await stateGet(WILDLIFE_CFG(chatId), "off");
+      const cfg = await stateGet(WILDLIFE_CFG(chatId), "daily");
       if (cfg === "off") continue;
       if (cfg === "twice" && weekday !== "Tue" && weekday !== "Sat") continue;
       try {
