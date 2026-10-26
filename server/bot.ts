@@ -4723,10 +4723,18 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
       await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(r.muteSeconds)}. Keep it kind in here.`,
         { reply_markup: { inline_keyboard: [[{ text: "Think this is a mistake? Ask admins", callback_data: `appeal:${from.id}` }]] } });
     }
-    await logViolation(String(chat.id), String(from.id), from.username || "", "protected_member", text.slice(0, 120), `Aimed at ${targeted.label}: ${reason}`, r.shouldBan ? "ban" : "mute");
+    await logViolation(String(chat.id), String(from.id), from.username || "", "protected_member", text.slice(0, 120), `Aimed at a protected member: ${reason}`, r.shouldBan ? "ban" : "mute");
     await incrementModStat(String(chat.id), "messagesBlocked");
   } catch (e) { console.log("Protected-member hold failed:", e); }
   return true;
+}
+
+
+// Replies to protected-list commands go to the owner privately, and the command is removed from the group.
+async function privateOwnerReply(ctx: MyContext, text: string): Promise<void> {
+  try { if (ctx.chat && ctx.message) await ctx.api.deleteMessage(ctx.chat.id, ctx.message.message_id); } catch {}
+  try { if (ctx.from) await ctx.api.sendMessage(ctx.from.id, text); }
+  catch { try { if (ctx.chat) await ctx.api.sendMessage(ctx.chat.id, "Done. (Open a private chat with me and send /start to get replies privately.)"); } catch {} }
 }
 
 // === BOT SETUP ===
@@ -6983,9 +6991,9 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       else list.push({ id: String(replied.id), username: replied.username, label: replied.username ? `@${replied.username}` : (replied.first_name || String(replied.id)) });
     } else if (/^\w{4,32}$/.test(arg)) {
       if (!list.some(p => p.username && p.username.toLowerCase() === arg.toLowerCase())) list.push({ username: arg, label: `@${arg}` });
-    } else { await ctx.reply("Usage: reply to their message with /protect, or /protect @username"); return; }
+    } else { await privateOwnerReply(ctx, "Usage: reply to their message with /protect, or /protect @username"); return; }
     await saveProtected(ctx.chat.id, list);
-    await ctx.reply("Added to the protected list. Anyone who targets them with insults or put-downs will be removed and muted.");
+    await privateOwnerReply(ctx, "Added to the protected list. Anyone who targets them with insults or put-downs will be removed and muted. Only you and TreeFitty can see or change this list.");
   });
 
   bot.command("unprotect", async (ctx) => {
@@ -6995,13 +7003,13 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     const list = (await getProtected(ctx.chat.id)).filter(p =>
       !((replied && p.id === String(replied.id)) || (arg && p.username && p.username.toLowerCase() === arg)));
     await saveProtected(ctx.chat.id, list);
-    await ctx.reply("Removed from the protected list.");
+    await privateOwnerReply(ctx, "Removed from the protected list.");
   });
 
   bot.command("protected", async (ctx) => {
-    if (!ctx.chat || ctx.chat.id >= 0 || !(await canRunAdminCmd(ctx))) return;
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageCommunityTrust(ctx)) return;
     const list = await getProtected(ctx.chat.id);
-    await ctx.reply(list.length ? "PROTECTED MEMBERS\n\n" + list.map(p => `• ${p.label}${p.id ? " (ID saved)" : " (waiting for them to join or post)"}`).join("\n") : "Nobody on the protected list.");
+    await privateOwnerReply(ctx, list.length ? "PROTECTED MEMBERS\n\n" + list.map(p => `• ${p.label}${p.id ? " (ID saved)" : " (waiting for them to join or post)"}`).join("\n") : "Nobody on the protected list.");
   });
 
   // === ADMIN TOOLS: mod log, scheduled posts, holders, appeals ===
