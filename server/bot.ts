@@ -4650,7 +4650,7 @@ const WILDLIFE_CFG = (chatId: string | number) => `w:wildlife:cfg:${chatId}`;
 // === PROTECTED MEMBERS ===
 // People the owners never want picked on. Anyone replying to, mentioning or
 // targeting a protected member with insults or mockery is removed and muted.
-interface ProtectedMember { id?: string; username?: string; label: string; }
+interface ProtectedMember { id?: string; username?: string; first?: string; last?: string; names?: string[]; label: string; }
 const PROTECTED_KEY = (chatId: string | number) => `w:protected:${chatId}`;
 const PROTECTED_DEFAULT: ProtectedMember[] = [{ username: "RealAshleyWard", label: "@RealAshleyWard" }];
 
@@ -4661,14 +4661,42 @@ async function saveProtected(chatId: string | number, list: ProtectedMember[]): 
   await stateSet(PROTECTED_KEY(chatId), list, 5 * 365 * 24 * 60 * 60);
 }
 
+// Who may change the protected list: the two owners, plus anyone listed in
+// PROTECTED_MANAGER_USER_IDS (comma-separated numeric Telegram IDs).
+function protectedManagerIds(): string[] {
+  return (process.env.PROTECTED_MANAGER_USER_IDS || "").split(",").map(x => x.trim()).filter(Boolean);
+}
+function canManageProtected(ctx: MyContext): boolean {
+  if (canManageCommunityTrust(ctx)) return true;
+  return !!ctx.from && protectedManagerIds().includes(String(ctx.from.id));
+}
+function protectedAlertIds(): string[] {
+  return Array.from(new Set([GLOBAL_OWNER_USER_ID, process.env.TREEFITTY_USER_ID || "", ...protectedManagerIds()].filter(Boolean)));
+}
+// Words that point at a protected member: username, first and full name, nicknames.
+function protectedWords(p: ProtectedMember): string[] {
+  const full = p.first && p.last ? `${p.first} ${p.last}` : "";
+  return Array.from(new Set([p.username, p.first, full, ...(p.names || [])]
+    .map(w => (w || "").trim().toLowerCase()).filter(w => w.length >= 3)));
+}
+function wordIn(text: string, word: string): boolean {
+  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(text);
+}
+
 // When a listed person first speaks, remember their numeric ID (usernames can change).
 async function captureProtectedId(ctx: MyContext): Promise<void> {
   const from = ctx.from, chat = ctx.chat;
-  if (!from || !chat || chat.id >= 0 || !from.username) return;
+  if (!from || !chat || chat.id >= 0) return;
   const list = await getProtected(chat.id);
-  const hit = list.find(p => !p.id && p.username && p.username.toLowerCase() === from.username!.toLowerCase());
+  const hit = list.find(p => (p.id && p.id === String(from.id)) ||
+    (!p.id && p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase()));
   if (!hit) return;
+  const first = (from.first_name || "").trim(), last = (from.last_name || "").trim();
+  if (hit.id === String(from.id) && hit.first === first && hit.last === last && hit.username === (from.username || hit.username)) return;
   hit.id = String(from.id);
+  hit.first = first || hit.first; hit.last = last || hit.last;
+  if (from.username) hit.username = from.username;
   await saveProtected(chat.id, list);
 }
 
@@ -4686,29 +4714,50 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
 
   const lower = text.toLowerCase();
   const repliedTo = msg.reply_to_message?.from;
-  const targeted = list.find(p =>
+  let targeted = list.find(p =>
     (repliedTo && ((p.id && p.id === String(repliedTo.id)) || (p.username && repliedTo.username && p.username.toLowerCase() === repliedTo.username.toLowerCase()))) ||
     (p.username && lower.includes("@" + p.username.toLowerCase())) ||
     (p.id && (msg.entities || []).some((e: any) => e.type === "text_mention" && String(e.user?.id) === p.id))
   );
+  let nameOnly = false;
+  if (!targeted) {
+    // Not tagged or replied to: look for her name or a nickname, or a reply to a message that names her.
+    const quoted = String((msg.reply_to_message as any)?.text || (msg.reply_to_message as any)?.caption || "");
+    targeted = list.find(p => protectedWords(p).some(w => wordIn(text, w))) ||
+      (quoted ? list.find(p => protectedWords(p).some(w => wordIn(quoted, w)) || (p.username && quoted.toLowerCase().includes("@" + p.username.toLowerCase()))) : undefined);
+    nameOnly = !!targeted;
+  }
   if (!targeted) return false;
   if (await isUserAdmin(ctx, from.id)) return false;
 
-  let hostile = false, reason = "";
+  let hostile = false, aboutThem = !nameOnly, confident = !nameOnly, reason = "";
   try {
+    const quotedCtx = nameOnly ? String((msg.reply_to_message as any)?.text || "").slice(0, 400) : "";
     const ai = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: 'You protect a community member from being picked on. Decide if the message below, which is aimed at that member, is hostile: insults, mockery, put-downs, sarcasm meant to demean, harassment, sexual remarks, threats, dismissing or belittling them, or stirring others up against them. Friendly or neutral messages, questions and compliments are NOT hostile. Reply JSON only: {"hostile": true or false, "reason": "short reason"}.' },
-        { role: "user", content: text.slice(0, 1200) },
+        { role: "system", content: 'You protect a community member from being picked on. Decide if the message below is hostile toward the protected member: insults, mockery, put-downs, sarcasm meant to demean, harassment, sexual remarks, threats, belittling them, or stirring others up against them. Friendly or neutral messages, questions and compliments are NOT hostile. ' +
+          (nameOnly ? `The message was not sent to them directly. It may mention their name (${protectedWords(targeted).join(", ")}), which could also belong to someone else. Set about_protected true ONLY if it is clearly about the protected member. ` : "It is aimed at the protected member. ") +
+          'Reply JSON only: {"hostile": true or false, "about_protected": true or false, "confidence": "high" or "low", "reason": "short reason"}.' },
+        { role: "user", content: (quotedCtx ? `(Replying to: ${quotedCtx})\n` : "") + text.slice(0, 1200) },
       ],
-      max_tokens: 60,
+      max_tokens: 80,
     });
-    const v = JSON.parse(ai.choices[0]?.message?.content || "{}") as { hostile?: boolean; reason?: string };
-    hostile = v.hostile === true; reason = String(v.reason || "hostile toward a protected member").slice(0, 100);
+    const v = JSON.parse(ai.choices[0]?.message?.content || "{}") as { hostile?: boolean; about_protected?: boolean; confidence?: string; reason?: string };
+    hostile = v.hostile === true;
+    if (nameOnly) { aboutThem = v.about_protected === true; confident = v.confidence === "high"; }
+    reason = String(v.reason || "hostile toward a protected member").slice(0, 100);
   } catch { return false; } // fail open
-  if (!hostile) return false;
+  if (!hostile || !aboutThem) return false;
+  if (!confident) {
+    // Not sure enough to act: tell the owners privately and leave the message.
+    const who = from.username ? `@${from.username}` : (from.first_name || String(from.id));
+    for (const id of protectedAlertIds()) {
+      try { await ctx.api.sendMessage(Number(id), `PROTECTED-MEMBER ALERT (no action taken)\nGroup: ${chat.title || chat.id}\nFrom: ${who}\nMessage: ${text.slice(0, 500)}\n\nIt looks like it may be hostile toward a protected member, but I wasn't sure enough to remove it. Please check.`); } catch {}
+    }
+    return false;
+  }
 
   try { await ctx.api.deleteMessage(chat.id, messageId); } catch {}
   try {
@@ -4803,7 +4852,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -6982,7 +7031,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
   // === PROTECTED MEMBERS (owners only) ===
   // /protect (reply to their message, or /protect @username)
   bot.command("protect", async (ctx) => {
-    if (!ctx.chat || ctx.chat.id >= 0 || !canManageCommunityTrust(ctx)) return;
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
     const list = await getProtected(ctx.chat.id);
     const replied = ctx.message?.reply_to_message?.from;
     const arg = (ctx.match || "").toString().trim().replace(/^@/, "");
@@ -6994,11 +7043,11 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       if (!list.some(p => p.username && p.username.toLowerCase() === arg.toLowerCase())) list.push({ username: arg, label: `@${arg}` });
     } else { await privateOwnerReply(ctx, "Usage: reply to their message with /protect, or /protect @username"); return; }
     await saveProtected(ctx.chat.id, list);
-    await privateOwnerReply(ctx, "Added to the protected list. Anyone who targets them with insults or put-downs will be removed and muted. Only you and TreeFitty can see or change this list.");
+    await privateOwnerReply(ctx, "Added to the protected list. Anyone who targets them with insults or put-downs will be removed and muted. Only the owners and approved managers can see or change this list.");
   });
 
   bot.command("unprotect", async (ctx) => {
-    if (!ctx.chat || ctx.chat.id >= 0 || !canManageCommunityTrust(ctx)) return;
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
     const replied = ctx.message?.reply_to_message?.from;
     const arg = (ctx.match || "").toString().trim().replace(/^@/, "").toLowerCase();
     const list = (await getProtected(ctx.chat.id)).filter(p =>
@@ -7008,9 +7057,35 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
   });
 
   bot.command("protected", async (ctx) => {
-    if (!ctx.chat || ctx.chat.id >= 0 || !canManageCommunityTrust(ctx)) return;
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
     const list = await getProtected(ctx.chat.id);
-    await privateOwnerReply(ctx, list.length ? "PROTECTED MEMBERS\n\n" + list.map(p => `• ${p.label}${p.id ? " (ID saved)" : " (waiting for them to join or post)"}`).join("\n") : "Nobody on the protected list.");
+    await privateOwnerReply(ctx, list.length ? "PROTECTED MEMBERS\n\n" + list.map(p => `• ${p.label}${p.id ? " (ID saved)" : " (waiting for them to join or post)"}${p.names && p.names.length ? "\\n   also watching for: " + p.names.join(", ") : ""}`).join("\n") : "Nobody on the protected list.");
+  });
+
+  // /protectname [@username] nickname  (or reply to their message)
+  bot.command("protectname", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const list = await getProtected(ctx.chat.id);
+    let arg = (ctx.match || "").toString().trim();
+    let target: ProtectedMember | undefined;
+    const m = arg.match(/^@(\w+)\s+(.+)$/);
+    const replied = ctx.message?.reply_to_message?.from;
+    if (m) { target = list.find(p => p.username && p.username.toLowerCase() === m[1].toLowerCase()); arg = m[2].trim(); }
+    else if (replied) target = list.find(p => (p.id && p.id === String(replied.id)) || (p.username && replied.username && p.username.toLowerCase() === replied.username.toLowerCase()));
+    else if (list.length === 1) target = list[0];
+    if (!target || arg.length < 3 || arg.length > 40) { await privateOwnerReply(ctx, "Usage: /protectname nickname (when one person is listed), or /protectname @username nickname. At least 3 letters."); return; }
+    target.names = Array.from(new Set([...(target.names || []), arg.toLowerCase()])).slice(0, 15);
+    await saveProtected(ctx.chat.id, list);
+    await privateOwnerReply(ctx, `Now also watching for "${arg}". Messages that use it are checked, and only removed when I'm confident they're hostile toward ${target.label}.`);
+  });
+
+  bot.command("unprotectname", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const arg = (ctx.match || "").toString().trim().toLowerCase();
+    const list = await getProtected(ctx.chat.id);
+    for (const p of list) p.names = (p.names || []).filter(n => n !== arg);
+    await saveProtected(ctx.chat.id, list);
+    await privateOwnerReply(ctx, `Stopped watching for "${arg}".`);
   });
 
   // === ADMIN TOOLS: mod log, scheduled posts, holders, appeals ===
