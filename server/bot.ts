@@ -4003,6 +4003,48 @@ async function markChatActivity(chatId: number): Promise<void> {
   await stateSet(`w:lastmsg:${chatId}`, Date.now(), 7 * 24 * 60 * 60);
 }
 
+// Quiet-chat drop-ins: after 10 quiet minutes in a chat that was active in the
+// last few hours, say hi, tell a joke, or share an animal / endangered-animal
+// fact. At most 4 a day per chat, and only in daytime Tasmania hours.
+const QUIET_MINUTES = 10;
+const ACTIVE_WINDOW_HOURS = 3;
+const MAX_DROPINS_PER_DAY = 4;
+
+function hobartNow(): { date: string; hour: number } {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Hobart", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", hour12: false,
+  }).formatToParts(new Date());
+  const g = (t: string) => parts.find(p => p.type === t)?.value || "";
+  return { date: `${g("year")}-${g("month")}-${g("day")}`, hour: Number(g("hour")) % 24 };
+}
+
+const DROPIN_KINDS: Array<{ kind: string; ask: string }> = [
+  { kind: "hello", ask: "Write one short, warm, dry line saying hi to the group and nudging them to say what they're up to. Max 25 words." },
+  { kind: "joke", ask: "Tell one short, clean joke, ideally Australian or animal themed. Max 40 words." },
+  { kind: "endangered", ask: "Share one true, well-established fact about an endangered or threatened animal (Australian species preferred). Name the animal. No made-up statistics; if unsure of a number, leave it out. Max 45 words." },
+  { kind: "animal", ask: "Share one true, well-established, surprising fact about any animal (Australian wildlife preferred). Name the animal. No made-up statistics. Max 45 words." },
+];
+
+async function generateDropin(): Promise<string | null> {
+  const pick = getRandomItem(DROPIN_KINDS);
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: `${WARDEN_SYSTEM_PROMPT}\n\nYou are posting unprompted into a quiet group chat. One message only, no greeting to a named person, no emoji spam, no hashtags, no placeholders. Output only the message text.` },
+        { role: "user", content: pick.ask },
+      ],
+      max_tokens: 140,
+    });
+    const text = (response.choices[0]?.message?.content || "").trim();
+    return text && text.length < 600 ? text : null;
+  } catch (error) {
+    console.error("[dropin] AI error:", error);
+    return null;
+  }
+}
+
 async function autoEngageIfQuiet(bot: Bot<MyContext>, chatId: number): Promise<boolean> {
   const feats = await getFeatureSettings(String(chatId));
   if (!feats.aiChat) return false;
@@ -4011,15 +4053,28 @@ async function autoEngageIfQuiet(bot: Bot<MyContext>, chatId: number): Promise<b
   if (!lastMsg) return false;
 
   const quietFor = Date.now() - lastMsg;
-  if (quietFor < AUTO_ENGAGE_MINUTES * 60 * 1000) return false;
+  if (quietFor < QUIET_MINUTES * 60 * 1000) return false;
+  // People must have been around recently; a dead chat gets nothing.
+  if (quietFor > ACTIVE_WINDOW_HOURS * 60 * 60 * 1000) return false;
+
+  // Daytime in Tasmania only (8am to 9pm)
+  const { date, hour } = hobartNow();
+  if (hour < 8 || hour >= 21) return false;
 
   // Don't nudge the same silence twice
   const lastNudge = await stateGet<number>(`w:lastnudge:${chatId}`, 0);
   if (lastNudge > lastMsg) return false;
 
+  // Daily cap
+  const countKey = `w:dropins:${chatId}:${date}`;
+  const used = await stateGet<number>(countKey, 0);
+  if (used >= MAX_DROPINS_PER_DAY) return false;
+
   try {
-    await bot.api.sendMessage(chatId, getRandomItem(AUTO_ENGAGE_MESSAGES));
+    const text = (await generateDropin()) || getRandomItem(AUTO_ENGAGE_MESSAGES);
+    await bot.api.sendMessage(chatId, text);
     await stateSet(`w:lastnudge:${chatId}`, Date.now(), 7 * 24 * 60 * 60);
+    await stateSet(countKey, used + 1, 36 * 60 * 60);
     return true;
   } catch {
     return false;

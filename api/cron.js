@@ -3779,7 +3779,6 @@ var AUTO_ENGAGE_MESSAGES = [
   "The Gateway's been here longer than any of us. It can wait. So can I.",
   "Anyone with a question about the collection, now's a good time. I'm not busy."
 ];
-var AUTO_ENGAGE_MINUTES = 30;
 var adminActivity = /* @__PURE__ */ new Map();
 var adminLastAlerted = /* @__PURE__ */ new Map();
 var ADMIN_INACTIVE_HOURS = 24;
@@ -4439,18 +4438,67 @@ async function checkInactiveAdmins(chatId) {
 async function markChatActivity(chatId) {
   await stateSet(`w:lastmsg:${chatId}`, Date.now(), 7 * 24 * 60 * 60);
 }
+var QUIET_MINUTES = 10;
+var ACTIVE_WINDOW_HOURS = 3;
+var MAX_DROPINS_PER_DAY = 4;
+function hobartNow() {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Hobart",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false
+  }).formatToParts(/* @__PURE__ */ new Date());
+  const g = (t) => parts.find((p) => p.type === t)?.value || "";
+  return { date: `${g("year")}-${g("month")}-${g("day")}`, hour: Number(g("hour")) % 24 };
+}
+var DROPIN_KINDS = [
+  { kind: "hello", ask: "Write one short, warm, dry line saying hi to the group and nudging them to say what they're up to. Max 25 words." },
+  { kind: "joke", ask: "Tell one short, clean joke, ideally Australian or animal themed. Max 40 words." },
+  { kind: "endangered", ask: "Share one true, well-established fact about an endangered or threatened animal (Australian species preferred). Name the animal. No made-up statistics; if unsure of a number, leave it out. Max 45 words." },
+  { kind: "animal", ask: "Share one true, well-established, surprising fact about any animal (Australian wildlife preferred). Name the animal. No made-up statistics. Max 45 words." }
+];
+async function generateDropin() {
+  const pick = getRandomItem2(DROPIN_KINDS);
+  try {
+    const response = await openai2.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: `${WARDEN_SYSTEM_PROMPT}
+
+You are posting unprompted into a quiet group chat. One message only, no greeting to a named person, no emoji spam, no hashtags, no placeholders. Output only the message text.` },
+        { role: "user", content: pick.ask }
+      ],
+      max_tokens: 140
+    });
+    const text2 = (response.choices[0]?.message?.content || "").trim();
+    return text2 && text2.length < 600 ? text2 : null;
+  } catch (error) {
+    console.error("[dropin] AI error:", error);
+    return null;
+  }
+}
 async function autoEngageIfQuiet(bot, chatId) {
   const feats = await getFeatureSettings(String(chatId));
   if (!feats.aiChat) return false;
   const lastMsg = await stateGet(`w:lastmsg:${chatId}`, 0);
   if (!lastMsg) return false;
   const quietFor = Date.now() - lastMsg;
-  if (quietFor < AUTO_ENGAGE_MINUTES * 60 * 1e3) return false;
+  if (quietFor < QUIET_MINUTES * 60 * 1e3) return false;
+  if (quietFor > ACTIVE_WINDOW_HOURS * 60 * 60 * 1e3) return false;
+  const { date, hour } = hobartNow();
+  if (hour < 8 || hour >= 21) return false;
   const lastNudge = await stateGet(`w:lastnudge:${chatId}`, 0);
   if (lastNudge > lastMsg) return false;
+  const countKey = `w:dropins:${chatId}:${date}`;
+  const used = await stateGet(countKey, 0);
+  if (used >= MAX_DROPINS_PER_DAY) return false;
   try {
-    await bot.api.sendMessage(chatId, getRandomItem2(AUTO_ENGAGE_MESSAGES));
+    const text2 = await generateDropin() || getRandomItem2(AUTO_ENGAGE_MESSAGES);
+    await bot.api.sendMessage(chatId, text2);
     await stateSet(`w:lastnudge:${chatId}`, Date.now(), 7 * 24 * 60 * 60);
+    await stateSet(countKey, used + 1, 36 * 60 * 60);
     return true;
   } catch {
     return false;
