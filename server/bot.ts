@@ -4187,6 +4187,39 @@ async function holdHiddenLink(ctx: MyContext): Promise<boolean> {
   }
 }
 
+
+// Links: only trusted members and admins may post them. Official project links
+// (the approved list) are fine from anyone.
+function messageLinks(text: string, entities?: Array<{ type: string; offset: number; length: number; url?: string }>): string[] {
+  const found: string[] = [];
+  for (const e of entities || []) {
+    if (e.type === "text_link" && e.url) found.push(e.url);
+    else if (e.type === "url") found.push(text.substr(e.offset, e.length));
+  }
+  const bare = text.match(/(?:https?:\/\/|www\.|t\.me\/)[^\s<>()]+|\b[a-z0-9-]+\.(?:com|net|org|io|xyz|app|me|co|gg|ly|link|site|online|info|top|club|finance|crypto|eth|live|fun|click|shop|store|cc|tk|ru|cn)\b[^\s<>()]*/gi) || [];
+  return [...found, ...bare];
+}
+function hasUnapprovedLink(text: string, entities?: Array<{ type: string; offset: number; length: number; url?: string }>): boolean {
+  return messageLinks(text, entities).some(l => !isAllowedUrl(/^https?:\/\//i.test(l) ? l : `https://${l}`));
+}
+
+async function holdLinkFromUntrusted(ctx: MyContext): Promise<boolean> {
+  const msg = ctx.message, from = ctx.from, chat = ctx.chat;
+  if (!msg || !from || !chat || from.is_bot || chat.id >= 0) return false;
+  const text = msg.text || "";
+  if (!hasUnapprovedLink(text, msg.entities as any)) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  try { await ctx.api.deleteMessage(chat.id, msg.message_id); } catch {}
+  await incrementModStat(String(chat.id), "linksBlocked");
+  const k = `w:linknotice:${chat.id}:${from.id}`;
+  if (!(await stateGet<boolean>(k, false))) {
+    await stateSet(k, true, 10 * 60);
+    const who = from.username ? `@${from.username}` : (from.first_name || "friend");
+    await ctx.api.sendMessage(chat.id, `${who}, only trusted members can post links here. It keeps the scammers out. Ask an admin if you need something shared.`);
+  }
+  return true;
+}
+
 // === BOT SETUP ===
 export function createBot(): Bot<MyContext> {
   const bot = new Bot<MyContext>(BOT_TOKEN!);
@@ -7719,7 +7752,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       shouldDelete = true;
       violationType = "edit_scam";
       actionTaken = "deleted";
-    } else if (hasLink && userIsNew) {
+    } else if (hasUnapprovedLink(newText, ctx.editedMessage.entities as any)) {
       shouldDelete = true;
       violationType = "edit_link";
       actionTaken = "deleted";
@@ -7795,7 +7828,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     let shouldDelete = false;
     let violationType = "";
     
-    if ((isScam && flags.length >= 2) || (hasLink && userIsNew) || hasWalletDrainer || hasContractAddress) {
+    if ((isScam && flags.length >= 2) || hasUnapprovedLink(caption, (ctx.editedMessage as any).caption_entities) || hasWalletDrainer || hasContractAddress) {
       shouldDelete = true;
       violationType = "edit_caption";
     }
@@ -8515,7 +8548,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       const hoursInChat = (Date.now() - new Date(userJoinDate).getTime()) / (1000 * 60 * 60);
       
       const linkHoursLimit = settings.raidMode ? 48 : settings.newUserLinkHours;
-      if (hoursInChat < linkHoursLimit && userStatus?.role === "newbie") {
+      if (true) { // only trusted members and admins reach here without the link check
         const allLinksAllowed = urls.every(url => 
           isAllowedUrl(url)
         );
@@ -8524,7 +8557,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
           try {
             await ctx.api.deleteMessage(chatId, ctx.message.message_id);
             await incrementModStat(chatIdStr, 'linksBlocked');
-            await ctx.reply(`Links in media captions are restricted for new members during the first ${linkHoursLimit} hours.`);
+            await ctx.reply(`Only trusted members can post links, including in captions.`);
           } catch (e) {
             console.log("Couldn't delete media with link caption from new user");
           }
@@ -8893,6 +8926,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     if (chatId && chatId < 0 && communityTrust !== "full" && communityTrust !== "trusted") {
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
+      if (await holdLinkFromUntrusted(ctx)) return;
     }
 
     // Update activity time and reset auto-engage timer

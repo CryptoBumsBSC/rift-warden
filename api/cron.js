@@ -4608,6 +4608,37 @@ async function holdHiddenLink(ctx) {
     return false;
   }
 }
+function messageLinks(text2, entities) {
+  const found = [];
+  for (const e of entities || []) {
+    if (e.type === "text_link" && e.url) found.push(e.url);
+    else if (e.type === "url") found.push(text2.substr(e.offset, e.length));
+  }
+  const bare = text2.match(/(?:https?:\/\/|www\.|t\.me\/)[^\s<>()]+|\b[a-z0-9-]+\.(?:com|net|org|io|xyz|app|me|co|gg|ly|link|site|online|info|top|club|finance|crypto|eth|live|fun|click|shop|store|cc|tk|ru|cn)\b[^\s<>()]*/gi) || [];
+  return [...found, ...bare];
+}
+function hasUnapprovedLink(text2, entities) {
+  return messageLinks(text2, entities).some((l) => !isAllowedUrl(/^https?:\/\//i.test(l) ? l : `https://${l}`));
+}
+async function holdLinkFromUntrusted(ctx) {
+  const msg = ctx.message, from = ctx.from, chat = ctx.chat;
+  if (!msg || !from || !chat || from.is_bot || chat.id >= 0) return false;
+  const text2 = msg.text || "";
+  if (!hasUnapprovedLink(text2, msg.entities)) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  try {
+    await ctx.api.deleteMessage(chat.id, msg.message_id);
+  } catch {
+  }
+  await incrementModStat(String(chat.id), "linksBlocked");
+  const k = `w:linknotice:${chat.id}:${from.id}`;
+  if (!await stateGet(k, false)) {
+    await stateSet(k, true, 10 * 60);
+    const who = from.username ? `@${from.username}` : from.first_name || "friend";
+    await ctx.api.sendMessage(chat.id, `${who}, only trusted members can post links here. It keeps the scammers out. Ask an admin if you need something shared.`);
+  }
+  return true;
+}
 function createBot() {
   const bot = new Bot(BOT_TOKEN);
   botInstance = bot;
@@ -7651,7 +7682,7 @@ To get a group's chatId, use /communities first.`
       shouldDelete = true;
       violationType = "edit_scam";
       actionTaken = "deleted";
-    } else if (hasLink && userIsNew) {
+    } else if (hasUnapprovedLink(newText, ctx.editedMessage.entities)) {
       shouldDelete = true;
       violationType = "edit_link";
       actionTaken = "deleted";
@@ -7709,7 +7740,7 @@ To get a group's chatId, use /communities first.`
     const hasContractAddress = /0x[a-fA-F0-9]{40}/i.test(caption);
     let shouldDelete = false;
     let violationType = "";
-    if (isScam && flags.length >= 2 || hasLink && userIsNew || hasWalletDrainer || hasContractAddress) {
+    if (isScam && flags.length >= 2 || hasUnapprovedLink(caption, ctx.editedMessage.caption_entities) || hasWalletDrainer || hasContractAddress) {
       shouldDelete = true;
       violationType = "edit_caption";
     }
@@ -8346,7 +8377,7 @@ I need ban permission to enforce this.`
       const userJoinDate2 = userStatus?.joinDate || /* @__PURE__ */ new Date();
       const hoursInChat = (Date.now() - new Date(userJoinDate2).getTime()) / (1e3 * 60 * 60);
       const linkHoursLimit = settings.raidMode ? 48 : settings.newUserLinkHours;
-      if (hoursInChat < linkHoursLimit && userStatus?.role === "newbie") {
+      if (true) {
         const allLinksAllowed = urls.every(
           (url) => isAllowedUrl(url)
         );
@@ -8354,7 +8385,7 @@ I need ban permission to enforce this.`
           try {
             await ctx.api.deleteMessage(chatId, ctx.message.message_id);
             await incrementModStat(chatIdStr, "linksBlocked");
-            await ctx.reply(`Links in media captions are restricted for new members during the first ${linkHoursLimit} hours.`);
+            await ctx.reply(`Only trusted members can post links, including in captions.`);
           } catch (e) {
             console.log("Couldn't delete media with link caption from new user");
           }
@@ -8680,6 +8711,7 @@ Admins, please review!`,
     if (chatId && chatId < 0 && communityTrust !== "full" && communityTrust !== "trusted") {
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
+      if (await holdLinkFromUntrusted(ctx)) return;
     }
     ctx.session.lastActivityTime = Date.now();
     if (chatId && chatId < 0) {
