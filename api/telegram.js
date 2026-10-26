@@ -4618,6 +4618,40 @@ async function holdAdminOnlyWord(ctx, text2, messageId) {
   );
   return true;
 }
+var MARKETING_PITCHES = [
+  /\b(i|we)\s+(can|will|could|offer|provide|do|run|specialise|specialize)\b.{0,50}\b(market\w*|promot\w*|advertis\w*|shill\w*|exposure|followers|growth|listings?)\b/i,
+  /\b(dm|pm|message|contact|inbox|text)\s*(me|us)\b.{0,50}\b(market\w*|promot\w*|advertis\w*|partner\w*|collab\w*|sponsor\w*|business|deal|offer|exposure)\b/i,
+  /\b(paid|cheap|affordable|guaranteed|professional)\s+(promotion|marketing|advertising|shill\w*|exposure|listing)\b/i,
+  /\b(grow|boost|increase|pump)\s+(your|ur)\s+(community|project|group|channel|followers|members|holders|volume|nft|collection)\b/i,
+  /\b(buy|get|boost)\s+(followers|members|views|likes|holders)\b/i,
+  /\b(partnership|collab(oration)?|sponsorship|marketing|promotion|advertising|business)\s+(proposal|offer|opportunity|inquiry|enquiry|request|deal)\b/i,
+  /\bcheck\s+(out|my)\s+(my|our)\s+(project|token|channel|group|nft|collection|website)\b/i
+];
+function containsMarketingPitch(text2) {
+  const t = text2 || "";
+  return MARKETING_PITCHES.some((r) => r.test(t));
+}
+async function holdMarketingPitch(ctx, text2, messageId) {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot || chat.id >= 0) return false;
+  if (!containsMarketingPitch(text2)) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  await punishRestrictedContent(
+    ctx,
+    messageId,
+    text2,
+    "marketing_pitch",
+    "Advertising and promotion pitches aren't allowed here. If you have a genuine partnership idea, ask an admin."
+  );
+  try {
+    const admins = await ctx.api.getChatAdministrators(chat.id);
+    const mentions = admins.filter((a) => !a.user.is_bot && a.user.username).slice(0, 3).map((a) => `@${a.user.username}`).join(" ");
+    const who = from.username ? `@${from.username}` : from.first_name || "A member";
+    if (mentions) await ctx.api.sendMessage(chat.id, `${mentions} \u2014 marketing pitch from ${who} removed. Their message started: "${text2.slice(0, 80).replace(/\n/g, " ")}"`);
+  } catch {
+  }
+  return true;
+}
 function createBot() {
   const bot = new Bot(BOT_TOKEN);
   botInstance = bot;
@@ -7685,7 +7719,7 @@ To get a group's chatId, use /communities first.`
     const hasSeedPhrase = detectSeedPhrase(newText);
     const drainerPhrases = ["verify wallet", "sync wallet", "connect wallet urgently", "wallet validation", "claim airdrop"];
     const hasWalletDrainer = drainerPhrases.some((phrase) => lowerText.includes(phrase));
-    const hasContractAddress = containsCryptoAddress(newText) || containsAdminOnlyWord(newText);
+    const hasContractAddress = containsCryptoAddress(newText) || containsAdminOnlyWord(newText) || _editTrust !== "trusted" && containsMarketingPitch(newText);
     let shouldDelete = false;
     let violationType = "";
     let actionTaken = "";
@@ -7748,7 +7782,7 @@ To get a group's chatId, use /communities first.`
     const { isScam, flags } = detectScam(caption, username);
     const hasLink = /https?:\/\/|t\.me\/|@\w+/i.test(caption);
     const hasWalletDrainer = ["verify wallet", "sync wallet", "connect wallet urgently"].some((p) => lowerCaption.includes(p));
-    const hasContractAddress = containsCryptoAddress(caption) || containsAdminOnlyWord(caption);
+    const hasContractAddress = containsCryptoAddress(caption) || containsAdminOnlyWord(caption) || _editTrust !== "trusted" && containsMarketingPitch(caption);
     let shouldDelete = false;
     let violationType = "";
     if (isScam && flags.length >= 2 || _editTrust !== "trusted" && hasUnapprovedLink(caption, ctx.editedMessage.caption_entities) || hasWalletDrainer || hasContractAddress) {
@@ -8423,6 +8457,7 @@ I need ban permission to enforce this.`
     }
     if (await holdCryptoAddress(ctx, caption, ctx.message.message_id)) return;
     if (await holdAdminOnlyWord(ctx, caption, ctx.message.message_id)) return;
+    if (communityTrust !== "trusted" && await holdMarketingPitch(ctx, caption, ctx.message.message_id)) return;
     if (communityTrust === "trusted") {
       if (await enforceTrustedLinkContractRules(ctx, caption)) return;
       await next();
@@ -8778,6 +8813,7 @@ Admins, please review!`,
       if (await holdHiddenLink(ctx)) return;
       if (await holdCryptoAddress(ctx, text2, ctx.message.message_id)) return;
       if (await holdAdminOnlyWord(ctx, text2, ctx.message.message_id)) return;
+      if (communityTrust !== "trusted" && await holdMarketingPitch(ctx, text2, ctx.message.message_id)) return;
       if (communityTrust !== "trusted" && await holdLinkFromUntrusted(ctx)) return;
     }
     ctx.session.lastActivityTime = Date.now();

@@ -4302,6 +4302,40 @@ async function holdAdminOnlyWord(ctx: MyContext, text: string, messageId: number
   return true;
 }
 
+// Marketing / promotion pitches from people who join to advertise. Plain use of
+// words like "marketing" or "partnership" in normal chat is fine; this looks for
+// the pitch itself ("I can promote your project", "DM me for marketing").
+const MARKETING_PITCHES = [
+  /\b(i|we)\s+(can|will|could|offer|provide|do|run|specialise|specialize)\b.{0,50}\b(market\w*|promot\w*|advertis\w*|shill\w*|exposure|followers|growth|listings?)\b/i,
+  /\b(dm|pm|message|contact|inbox|text)\s*(me|us)\b.{0,50}\b(market\w*|promot\w*|advertis\w*|partner\w*|collab\w*|sponsor\w*|business|deal|offer|exposure)\b/i,
+  /\b(paid|cheap|affordable|guaranteed|professional)\s+(promotion|marketing|advertising|shill\w*|exposure|listing)\b/i,
+  /\b(grow|boost|increase|pump)\s+(your|ur)\s+(community|project|group|channel|followers|members|holders|volume|nft|collection)\b/i,
+  /\b(buy|get|boost)\s+(followers|members|views|likes|holders)\b/i,
+  /\b(partnership|collab(oration)?|sponsorship|marketing|promotion|advertising|business)\s+(proposal|offer|opportunity|inquiry|enquiry|request|deal)\b/i,
+  /\bcheck\s+(out|my)\s+(my|our)\s+(project|token|channel|group|nft|collection|website)\b/i,
+];
+function containsMarketingPitch(text: string): boolean {
+  const t = text || "";
+  return MARKETING_PITCHES.some(r => r.test(t));
+}
+
+async function holdMarketingPitch(ctx: MyContext, text: string, messageId: number): Promise<boolean> {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot || chat.id >= 0) return false;
+  if (!containsMarketingPitch(text)) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  await punishRestrictedContent(ctx, messageId, text, "marketing_pitch",
+    "Advertising and promotion pitches aren't allowed here. If you have a genuine partnership idea, ask an admin.");
+  // Also flag it to the admins so they can see who is pitching.
+  try {
+    const admins = await ctx.api.getChatAdministrators(chat.id);
+    const mentions = admins.filter(a => !a.user.is_bot && a.user.username).slice(0, 3).map(a => `@${a.user.username}`).join(" ");
+    const who = from.username ? `@${from.username}` : (from.first_name || "A member");
+    if (mentions) await ctx.api.sendMessage(chat.id, `${mentions} — marketing pitch from ${who} removed. Their message started: "${text.slice(0, 80).replace(/\n/g, " ")}"`);
+  } catch { /* alert is best-effort */ }
+  return true;
+}
+
 // === BOT SETUP ===
 export function createBot(): Bot<MyContext> {
   const bot = new Bot<MyContext>(BOT_TOKEN!);
@@ -7857,7 +7891,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     const hasWalletDrainer = drainerPhrases.some(phrase => lowerText.includes(phrase));
     
     // Check for contract addresses
-    const hasContractAddress = containsCryptoAddress(newText) || containsAdminOnlyWord(newText);
+    const hasContractAddress = containsCryptoAddress(newText) || containsAdminOnlyWord(newText) || (_editTrust !== "trusted" && containsMarketingPitch(newText));
     
     let shouldDelete = false;
     let violationType = "";
@@ -7938,7 +7972,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     const { isScam, flags } = detectScam(caption, username);
     const hasLink = /https?:\/\/|t\.me\/|@\w+/i.test(caption);
     const hasWalletDrainer = ["verify wallet", "sync wallet", "connect wallet urgently"].some(p => lowerCaption.includes(p));
-    const hasContractAddress = containsCryptoAddress(caption) || containsAdminOnlyWord(caption);
+    const hasContractAddress = containsCryptoAddress(caption) || containsAdminOnlyWord(caption) || (_editTrust !== "trusted" && containsMarketingPitch(caption));
     
     let shouldDelete = false;
     let violationType = "";
@@ -8690,6 +8724,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     if (communityTrust === "full") { await next(); return; }
     if (await holdCryptoAddress(ctx, caption, ctx.message.message_id)) return;
     if (await holdAdminOnlyWord(ctx, caption, ctx.message.message_id)) return;
+    if (communityTrust !== "trusted" && await holdMarketingPitch(ctx, caption, ctx.message.message_id)) return;
     if (communityTrust === "trusted") {
       if (await enforceTrustedLinkContractRules(ctx, caption)) return;
       await next(); return;
@@ -9097,6 +9132,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       if (await holdHiddenLink(ctx)) return;
       if (await holdCryptoAddress(ctx, text, ctx.message.message_id)) return;
       if (await holdAdminOnlyWord(ctx, text, ctx.message.message_id)) return;
+      if (communityTrust !== "trusted" && await holdMarketingPitch(ctx, text, ctx.message.message_id)) return;
       if (communityTrust !== "trusted" && await holdLinkFromUntrusted(ctx)) return;
     }
 
