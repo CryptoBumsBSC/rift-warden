@@ -4676,7 +4676,8 @@ const PROTECTED_MUTE_STEP = 1; // skip the lightest mute: first offence = 4 hour
 
 // Is this message aimed at a protected member, and is it hostile?
 async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: number): Promise<boolean> {
-  const from = ctx.from, chat = ctx.chat, msg = ctx.message;
+  const from = ctx.from, chat = ctx.chat, msg = ctx.message ?? ctx.editedMessage;
+  const wasEdit = !ctx.message;
   if (!from || !chat || !msg || from.is_bot || chat.id >= 0) return false;
   const list = await getProtected(chat.id);
   if (!list.length) return false;
@@ -4720,10 +4721,10 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
     } else {
       await ctx.api.restrictChatMember(chat.id, from.id, { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
         { until_date: Math.floor(Date.now() / 1000) + r.muteSeconds });
-      await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(r.muteSeconds)}. Keep it kind in here.`,
+      await ctx.api.sendMessage(chat.id, `${who} muted for ${formatDuration(r.muteSeconds)}${wasEdit ? " (message was changed after posting)" : ""}. Keep it kind in here.`,
         { reply_markup: { inline_keyboard: [[{ text: "Think this is a mistake? Ask admins", callback_data: `appeal:${from.id}` }]] } });
     }
-    await logViolation(String(chat.id), String(from.id), from.username || "", "protected_member", text.slice(0, 120), `Aimed at a protected member: ${reason}`, r.shouldBan ? "ban" : "mute");
+    await logViolation(String(chat.id), String(from.id), from.username || "", "protected_member", text.slice(0, 120), `${wasEdit ? "Edited message. " : ""}Aimed at a protected member: ${reason}`, r.shouldBan ? "ban" : "mute");
     await incrementModStat(String(chat.id), "messagesBlocked");
   } catch (e) { console.log("Protected-member hold failed:", e); }
   return true;
@@ -8507,6 +8508,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     // contract addresses) apply to established members too.
     const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
     if (_editTrust === "full") return;
+    if (await holdProtectedHarassment(ctx, newText, ctx.editedMessage.message_id)) return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
     
     // Retrieve original content from database (if tracked)
@@ -8597,6 +8599,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       const member = await ctx.api.getChatMember(chatId, userId);
       if (member.status === "administrator" || member.status === "creator") return;
     } catch { /* continue with check */ }
+    if ((await getCommunityTrustClass(userIdStr, chatIdStr)) !== "full" && await holdProtectedHarassment(ctx, caption, ctx.editedMessage.message_id)) return;
     
     // Check if user is new
     // Everyone except trusted members is checked. Links are only blocked for

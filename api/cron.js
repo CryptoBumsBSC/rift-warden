@@ -5345,7 +5345,8 @@ async function captureProtectedId(ctx) {
 }
 var PROTECTED_MUTE_STEP = 1;
 async function holdProtectedHarassment(ctx, text2, messageId) {
-  const from = ctx.from, chat = ctx.chat, msg = ctx.message;
+  const from = ctx.from, chat = ctx.chat, msg = ctx.message ?? ctx.editedMessage;
+  const wasEdit = !ctx.message;
   if (!from || !chat || !msg || from.is_bot || chat.id >= 0) return false;
   const list = await getProtected(chat.id);
   if (!list.length) return false;
@@ -5395,11 +5396,11 @@ async function holdProtectedHarassment(ctx, text2, messageId) {
       );
       await ctx.api.sendMessage(
         chat.id,
-        `${who} muted for ${formatDuration(r.muteSeconds)}. Keep it kind in here.`,
+        `${who} muted for ${formatDuration(r.muteSeconds)}${wasEdit ? " (message was changed after posting)" : ""}. Keep it kind in here.`,
         { reply_markup: { inline_keyboard: [[{ text: "Think this is a mistake? Ask admins", callback_data: `appeal:${from.id}` }]] } }
       );
     }
-    await logViolation(String(chat.id), String(from.id), from.username || "", "protected_member", text2.slice(0, 120), `Aimed at a protected member: ${reason}`, r.shouldBan ? "ban" : "mute");
+    await logViolation(String(chat.id), String(from.id), from.username || "", "protected_member", text2.slice(0, 120), `${wasEdit ? "Edited message. " : ""}Aimed at a protected member: ${reason}`, r.shouldBan ? "ban" : "mute");
     await incrementModStat(String(chat.id), "messagesBlocked");
   } catch (e) {
     console.log("Protected-member hold failed:", e);
@@ -8711,6 +8712,7 @@ To get a group's chatId, use /communities first.`
     }
     const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
     if (_editTrust === "full") return;
+    if (await holdProtectedHarassment(ctx, newText, ctx.editedMessage.message_id)) return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
     const originalRecord = await getTrackedMessage(messageId, chatIdStr);
     const originalContent = originalRecord?.originalContent || void 0;
@@ -8776,6 +8778,7 @@ To get a group's chatId, use /communities first.`
       if (member.status === "administrator" || member.status === "creator") return;
     } catch {
     }
+    if (await getCommunityTrustClass(userIdStr, chatIdStr) !== "full" && await holdProtectedHarassment(ctx, caption, ctx.editedMessage.message_id)) return;
     const _editTrust = await getCommunityTrustClass(userIdStr, chatIdStr);
     if (_editTrust === "full") return;
     const userIsNew = await isNewUser(chatIdStr, userIdStr);
