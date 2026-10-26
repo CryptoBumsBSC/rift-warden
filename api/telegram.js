@@ -4196,7 +4196,7 @@ Start here:
 \u2022 Never trust a mint, contract or wallet link just because somebody sounds confident.
 \u2022 /info gives the project overview.
 \u2022 /safety gives the wallet-safety rules.
-\u2022 /radio opens Rift Radio \u2014 nine signals for when the chat needs a soundtrack.
+\u2022 /radio opens Rift Radio \u2014 twelve signals for when the chat needs a soundtrack.
 \u2022 /trivia and /puzzle are there when the serious people become unbearable.
 
 Tag @${BOT_USERNAME2} or reply to me and talk normally. Once you start a conversation with me, I'll keep talking with you until you wander off. Ask about the project, collection, lore, rules, wildlife, or what is happening in the community.`;
@@ -4472,7 +4472,7 @@ function createBot() {
     }
     const button = ctx.chat?.type === "private" ? { text: "OPEN RIFT RADIO", web_app: { url: RIFT_RADIO_URL } } : { text: "OPEN RIFT RADIO", url: RIFT_RADIO_URL };
     await ctx.reply(
-      "RIFT RADIO \u2014 NINE SIGNALS\n\nAmbient, deep space, old-time radio, Australian music, documentary and birdsong. Pick a frequency and leave it running. I won't judge the choice. Much.",
+      "RIFT RADIO \u2014 TWELVE SIGNALS\n\nAmbient, deep space, old-time radio, Australian music, documentary and birdsong. Pick a frequency and leave it running. I won't judge the choice. Much.",
       { reply_markup: { inline_keyboard: [[button]] } }
     );
   });

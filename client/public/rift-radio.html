@@ -104,6 +104,16 @@
   .vol:focus-visible{outline:2px solid var(--rift);outline-offset:5px}
   .vol-num{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--dead);
     flex:0 0 26px;text-align:right}
+  .vol{height:6px;border-radius:3px}
+  .vol::-webkit-slider-thumb{width:24px;height:24px}
+  .vol::-moz-range-thumb{width:24px;height:24px}
+  .deck-boost{display:flex;align-items:center;gap:7px;margin-top:9px;padding-top:10px;border-top:1px solid var(--edge)}
+  .boost-lbl{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;color:var(--dead);flex:0 0 auto;margin-right:2px}
+  .bst{flex:1;background:none;border:1px solid var(--edge);color:var(--dim);border-radius:2px;
+    font-family:'IBM Plex Mono',monospace;font-size:11px;padding:9px 0;cursor:pointer;transition:border-color .18s,color .18s}
+  .bst.on{border-color:var(--rift);color:var(--rift)}
+  .bst:disabled{opacity:.35;cursor:default}
+  .boost-note{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--dead);margin-top:6px;letter-spacing:.06em}
   .deck.up{transform:translateY(0)}
   .deck-body{flex:1;min-width:0}
   .deck-label{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;
@@ -126,7 +136,7 @@
 <div class="dial">
   <div class="dial-head">
     <div class="mark">RIFT <span>RADIO</span></div>
-    <div class="sub">Nine signals</div>
+    <div class="sub">Twelve signals</div>
   </div>
   <div class="scale">
     <div class="ticks" id="ticks"></div>
@@ -169,9 +179,18 @@
            aria-label="Volume">
     <span class="vol-num" id="volNum">70</span>
   </div>
+  <div class="deck-boost">
+    <span class="boost-lbl">BOOST</span>
+    <button class="bst on" data-b="1">OFF</button>
+    <button class="bst" data-b="1.5">1.5&times;</button>
+    <button class="bst" data-b="2">2&times;</button>
+    <button class="bst" data-b="3">3&times;</button>
+  </div>
+  <div class="boost-note" id="boostNote"></div>
 </div>
 
-<audio id="player" crossorigin="anonymous"></audio>
+<audio id="player"></audio>
+<audio id="playerB" crossorigin="anonymous"></audio>
 
 <script>
 const tg = window.Telegram?.WebApp;
@@ -187,41 +206,54 @@ const buzz = (s='light') => tg?.HapticFeedback?.impactOccurred?.(s);
 //            in the public radio directory instead. Belt and braces.
 //
 const STATIONS = [
-  { name:"Field Notes", real:"ABC Radio National",
+  { name:"Field Notes", real:"ABC Radio National", cors:true,
     desc:"Talk, documentary and ideas. Carries the wildlife and environment programmes.",
     url:"https://abc.streamguys1.com/live/rnnsw/icecast.audio", lookup:"ABC Radio National" },
 
-  { name:"The Archive", real:"WALM Old Time Radio",
+  { name:"The Archive", real:"WALM Old Time Radio", cors:false,
     desc:"1940s and 50s serials. Sci-fi, mystery, the unexplained.",
-    url:"https://icecast.walmradio.com:8443/otr", lookup:"Old Time Radio" },
+    url:"https://icecast.walmradio.com:8443/otr", lookup:"Old Time Radio",
+    alts:["https://s8.yesstreaming.net:17011/stream","https://s6.yesstreaming.net:17082/stream"] },
 
-  { name:"Gateway Control", real:"SomaFM Mission Control",
+  { name:"Gateway Control", real:"SomaFM Mission Control", cors:true,
     desc:"Real NASA flight-control chatter and space-age ambient. Long silences, then a voice from orbit.",
     url:"https://ice1.somafm.com/missioncontrol-128-mp3", lookup:"Mission Control" },
 
-  { name:"The Far Side", real:"SomaFM Deep Space One",
+  { name:"The Far Side", real:"SomaFM Deep Space One", cors:true,
     desc:"Deep ambient. Almost no beat at all.",
     url:"https://ice1.somafm.com/deepspaceone-128-mp3", lookup:"Deep Space One" },
 
-  { name:"The Long Quiet", real:"SomaFM Drone Zone",
+  { name:"The Long Quiet", real:"SomaFM Drone Zone", cors:true,
     desc:"Pure texture. The slowest thing on the dial.",
     url:"https://ice1.somafm.com/dronezone-128-mp3", lookup:"Drone Zone" },
 
-  { name:"Nightfall", real:"SomaFM Doomed",
+  { name:"Nightfall", real:"SomaFM Doomed", cors:true,
     desc:"Dark ambient and horror soundtrack. Best after midnight.",
     url:"https://ice1.somafm.com/doomed-128-mp3", lookup:"SomaFM Doomed" },
 
-  { name:"Static Memory", real:"SomaFM Vaporwaves",
+  { name:"Static Memory", real:"SomaFM Vaporwaves", cors:true,
     desc:"Slowed, half-remembered, faintly wrong.",
     url:"https://ice1.somafm.com/vaporwaves-128-mp3", lookup:"Vaporwaves" },
 
-  { name:"Bush Frequency", real:"ABC Triple J",
+  { name:"Bush Frequency", real:"ABC Triple J", cors:true,
     desc:"New Australian music.",
     url:"https://abc.streamguys1.com/live/triplejnsw/icecast.audio", lookup:"Triple J" },
 
-  { name:"Dawn Chorus", real:"Birdsong Radio",
+  { name:"Dawn Chorus", real:"Birdsong Radio", cors:true,
     desc:"Birdsong, day and night. Recorded, not synthesised.",
     url:"https://a1.radio.co/s5c5da6a36/listen", lookup:"Birdsong Radio" },
+
+  { name:"The Vault", real:"Conyers Old Time Radio", cors:true,
+    desc:"More 1940s radio. Comedy, drama and detective serials, all night.",
+    url:"https://s8.yesstreaming.net:17011/stream", lookup:"Conyers Old Time Radio" },
+
+  { name:"Dead Air", real:"ROKit Classic Crime and Suspense", cors:true,
+    desc:"Old crime and suspense plays. Footsteps, a door, a long pause.",
+    url:"https://streaming04.liveboxstream.uk/proxy/roksta17/stream", lookup:"Classic Crime and Suspense" },
+
+  { name:"Midnight Theatre", real:"CBS Radio Mystery Theater", cors:true,
+    desc:"Mystery and horror plays, the creaking door and all.",
+    url:"https://ais-sa3.cdnstream1.com/2800_128.mp3", lookup:"Radio Mystery Theater" },
 ];
 
 // ── Dial ────────────────────────────────────────────────────────────────────
@@ -257,6 +289,8 @@ async function lookupStream(query) {
 
 // ── Build ───────────────────────────────────────────────────────────────────
 const player   = document.getElementById('player');
+const playerB  = document.getElementById('playerB');
+let cur = player;
 const deck     = document.getElementById('deck');
 const deckName = document.getElementById('deckName');
 const deckLbl  = document.getElementById('deckLabel');
@@ -326,25 +360,45 @@ async function tune(i) {
   // Keep the live channel on screen when skipping with the arrows.
   btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 
-  player.src = st.url;
-  player.volume = muted ? 0 : level / 100;
-
-  try {
-    await player.play();
-  } catch {
-    state.textContent = 'Retuning';
-    const alt = await lookupStream(st.lookup);
-    if (alt && alt !== st.url) {
-      st.url = alt;
-      player.src = alt;
-      player.volume = muted ? 0 : level / 100;
-      try { await player.play(); state.textContent = 'Live'; return; } catch {}
-    }
-    state.textContent = 'Off air';
-    state.classList.add('down');
-    state.classList.remove('live');
-    deckLbl.textContent = "Couldn't reach that station";
+  // Boost-capable stations (those that send the right headers) play through
+  // playerB and the gain stage; the rest play straight, no boost.
+  let el = player;
+  if (st.cors && ensureGraph()) {
+    el = playerB;
+    try { await actx.resume(); } catch {}
   }
+  const other = el === player ? playerB : player;
+  other.pause(); other.removeAttribute('src'); other.load();
+  cur = el;
+  updateBoostUI();
+  el.src = st.url;
+  applyVolume();
+
+  const tries = [st.url, ...(st.alts || [])];
+  let ok = false;
+  try { await el.play(); ok = true; } catch {}
+
+  // Fall back: plain element, then backups, then the public directory lookup.
+  if (!ok) {
+    state.textContent = 'Retuning';
+    const extra = await lookupStream(st.lookup);
+    const list = [...tries.slice(1), ...(extra ? [extra] : [])];
+    for (const u of [st.url, ...list]) {
+      if (playing !== i) return;
+      player.src = u;
+      cur = player;
+      other.pause();
+      playerB.pause();
+      updateBoostUI();
+      applyVolume();
+      try { await player.play(); st.url = u; ok = true; break; } catch {}
+    }
+  }
+  if (ok) { state.textContent = 'Live'; state.classList.remove('down'); state.classList.add('live'); deckLbl.textContent = 'Now playing'; return; }
+  state.textContent = 'Off air';
+  state.classList.add('down');
+  state.classList.remove('live');
+  deckLbl.textContent = "Couldn't reach that station";
 }
 
 // Skip past anything that's off air, wrapping around the dial.
@@ -367,9 +421,7 @@ function stop() {
       state.classList.remove('live');
     }
   }
-  player.pause();
-  player.removeAttribute('src');
-  player.load();
+  for (const e of [player, playerB]) { e.pause(); e.removeAttribute('src'); e.load(); }
   playing = -1;
   deck.classList.remove('up');
   deckLbl.textContent = 'Now playing';
@@ -389,8 +441,48 @@ const muteBtn = document.getElementById('muteBtn');
 let level = Number(localStorage.getItem('riftradio.vol') ?? 70);
 let muted = localStorage.getItem('riftradio.muted') === '1';
 
+// ── Boost ───────────────────────────────────────────────────────────────────
+// Real extra loudness through a gain stage with a limiter so it can't clip.
+// Only works on streams that allow it; the rest play at normal level.
+let actx = null, gainNode = null, boost = Number(localStorage.getItem('riftradio.boost') ?? 1);
+if (![1, 1.5, 2, 3].includes(boost)) boost = 1;
+function ensureGraph() {
+  if (gainNode) return true;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    actx = new AC();
+    const src = actx.createMediaElementSource(playerB);
+    gainNode = actx.createGain();
+    const lim = actx.createDynamicsCompressor();
+    lim.threshold.value = -10; lim.knee.value = 18; lim.ratio.value = 8;
+    lim.attack.value = .003; lim.release.value = .2;
+    src.connect(gainNode); gainNode.connect(lim); lim.connect(actx.destination);
+    return true;
+  } catch { gainNode = null; actx = null; return false; }
+}
+const bstBtns = [...document.querySelectorAll('.bst')];
+const boostNote = document.getElementById('boostNote');
+function updateBoostUI() {
+  const can = !!gainNode && cur === playerB;
+  bstBtns.forEach(b => {
+    b.disabled = !can;
+    b.classList.toggle('on', can ? Number(b.dataset.b) === boost : Number(b.dataset.b) === 1);
+  });
+  boostNote.textContent = can ? (boost > 1 ? 'Boost on. Turn down if it distorts.' : '')
+                              : (playing >= 0 ? 'Boost is not available on this station. Use your phone volume.' : '');
+}
+bstBtns.forEach(b => b.addEventListener('click', () => {
+  boost = Number(b.dataset.b);
+  localStorage.setItem('riftradio.boost', String(boost));
+  applyVolume(); updateBoostUI(); buzz('soft');
+}));
+
 function applyVolume() {
-  player.volume = muted ? 0 : level / 100;
+  const base = muted ? 0 : level / 100;
+  player.volume = base;
+  if (gainNode) { playerB.volume = 1; gainNode.gain.value = base * (cur === playerB ? boost : 1); }
+  else playerB.volume = base;
   volEl.value = level;
   volNum.textContent = muted ? 'off' : level;
   muteBtn.classList.toggle('muted', muted);
@@ -459,15 +551,18 @@ window.addEventListener('resize', sizeWave);
 // Each channel gets its own character — slower and flatter for the ambient
 // ones, busier for music and talk. Index matches STATIONS.
 const CHARACTER = [
-  { speed:.021, layers:3, chop:.55 },  // Field Notes — speech
-  { speed:.020, layers:3, chop:.55 },  // The Archive — speech
-  { speed:.010, layers:2, chop:.15 },  // Gateway Control — long silences
-  { speed:.008, layers:2, chop:.10 },  // The Far Side
-  { speed:.006, layers:2, chop:.06 },  // The Long Quiet — slowest
-  { speed:.013, layers:3, chop:.30 },  // Nightfall
-  { speed:.018, layers:3, chop:.35 },  // Static Memory
-  { speed:.026, layers:4, chop:.60 },  // Bush Frequency — music
-  { speed:.014, layers:4, chop:.45 },  // Dawn Chorus — birds, spiky
+  { speed:.021, layers:3, chop:.55 },
+  { speed:.020, layers:3, chop:.55 },
+  { speed:.010, layers:2, chop:.15 },
+  { speed:.008, layers:2, chop:.10 },
+  { speed:.006, layers:2, chop:.06 },
+  { speed:.013, layers:3, chop:.30 },
+  { speed:.018, layers:3, chop:.35 },
+  { speed:.026, layers:4, chop:.60 },
+  { speed:.014, layers:4, chop:.45 },
+  { speed:.020, layers:3, chop:.55 },
+  { speed:.018, layers:3, chop:.50 },
+  { speed:.018, layers:3, chop:.50 },
 ];
 
 function drawWave() {
@@ -539,14 +634,14 @@ document.addEventListener('visibilitychange', () => {
 
 document.getElementById('stopBtn').addEventListener('click', stop);
 
-player.addEventListener('error', () => {
-  if (playing < 0) return;
+[player, playerB].forEach(e => e.addEventListener('error', () => {
+  if (playing < 0 || e !== cur) return;
   const s = buttons[playing].querySelector('.st-state');
   s.textContent = 'Dropped';
   s.classList.add('down');
   s.classList.remove('live');
   deckLbl.textContent = 'Signal lost';
-});
+}));
 </script>
 </body>
 </html>

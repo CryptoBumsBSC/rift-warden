@@ -292,7 +292,7 @@ Tag `@RiftWardenBot` or reply to one of its messages to open a conversational se
 ## Rift Radio
 
 The bot includes **Rift Radio** at `/rift-radio.html` and exposes it with `/radio`.
-The page is Telegram Web App-aware and contains nine live/fallback radio signals.
+The page is Telegram Web App-aware and contains twelve live/fallback radio signals.
 If `RIFT_RADIO_URL` is blank, the bot automatically uses `PUBLIC_URL/rift-radio.html`.
 
 The radio is deliberately independent from moderation and AI: an unavailable radio

@@ -3608,7 +3608,7 @@ function memberLabel(user: { username?: string; first_name?: string }): string {
 }
 
 function buildFirstWelcome(label: string, botName = "The Warden"): string {
-  return `${label}, welcome through the Gateway. I'm ${botName} — part doorman, part record-keeper, part scammer's recurring administrative problem.\n\nBoomerverse is an Australian collectible universe built around wildlife, bush legend, relics and the Rift. Genesis is the first collection: 333 unique ERC-721 pieces on Base. The project is about original art, canon, community and long-term stewardship — not investment promises, and there is no ERC-20 token.\n\nStart here:\n• Read the pinned messages and official links.\n• Nobody from the project will DM you first.\n• Never trust a mint, contract or wallet link just because somebody sounds confident.\n• /info gives the project overview.\n• /safety gives the wallet-safety rules.\n• /radio opens Rift Radio — nine signals for when the chat needs a soundtrack.\n• /trivia and /puzzle are there when the serious people become unbearable.\n\nTag @${BOT_USERNAME} or reply to me and talk normally. Once you start a conversation with me, I'll keep talking with you until you wander off. Ask about the project, collection, lore, rules, wildlife, or what is happening in the community.`;
+  return `${label}, welcome through the Gateway. I'm ${botName} — part doorman, part record-keeper, part scammer's recurring administrative problem.\n\nBoomerverse is an Australian collectible universe built around wildlife, bush legend, relics and the Rift. Genesis is the first collection: 333 unique ERC-721 pieces on Base. The project is about original art, canon, community and long-term stewardship — not investment promises, and there is no ERC-20 token.\n\nStart here:\n• Read the pinned messages and official links.\n• Nobody from the project will DM you first.\n• Never trust a mint, contract or wallet link just because somebody sounds confident.\n• /info gives the project overview.\n• /safety gives the wallet-safety rules.\n• /radio opens Rift Radio — twelve signals for when the chat needs a soundtrack.\n• /trivia and /puzzle are there when the serious people become unbearable.\n\nTag @${BOT_USERNAME} or reply to me and talk normally. Once you start a conversation with me, I'll keep talking with you until you wander off. Ask about the project, collection, lore, rules, wildlife, or what is happening in the community.`;
 }
 
 async function getConversationState(chatId: number | string, userId: number | string): Promise<ConversationState | null> {
@@ -4133,7 +4133,7 @@ export function createBot(): Bot<MyContext> {
       : { text: "OPEN RIFT RADIO", url: RIFT_RADIO_URL };
 
     await ctx.reply(
-      "RIFT RADIO — NINE SIGNALS\n\nAmbient, deep space, old-time radio, Australian music, documentary and birdsong. Pick a frequency and leave it running. I won't judge the choice. Much.",
+      "RIFT RADIO — TWELVE SIGNALS\n\nAmbient, deep space, old-time radio, Australian music, documentary and birdsong. Pick a frequency and leave it running. I won't judge the choice. Much.",
       { reply_markup: { inline_keyboard: [[button]] } }
     );
   });
