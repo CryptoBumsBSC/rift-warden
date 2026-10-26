@@ -17,7 +17,15 @@
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{background:var(--void);color:var(--text);
     font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-  body{min-height:100vh;padding:0 0 200px}
+  body{min-height:100vh;min-height:100dvh;padding:0 0 200px}
+  /* Centered column on PC / wide windows; full width on phones */
+  .dial,main{max-width:560px;margin-left:auto;margin-right:auto}
+  .deck{max-width:560px;margin-left:auto;margin-right:auto;border-left:1px solid var(--edge);border-right:1px solid var(--edge)}
+  .back{display:none;margin-left:auto;background:none;border:1px solid var(--edge);color:var(--dim);
+    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;padding:6px 10px;
+    border-radius:2px;cursor:pointer;text-transform:uppercase;align-self:center}
+  .back:hover{color:var(--text);border-color:var(--rift)}
+  .in-tg .back{display:block}
 
   /* Signature: a frequency dial that physically tunes when you pick a station.
      One flourish. Everything below it stays quiet. */
@@ -137,6 +145,7 @@
   <div class="dial-head">
     <div class="mark">RIFT <span>RADIO</span></div>
     <div class="sub">Twelve signals</div>
+    <button class="back" id="backBtn" type="button">&#8592; Chat</button>
   </div>
   <div class="scale">
     <div class="ticks" id="ticks"></div>
@@ -194,7 +203,8 @@
 
 <script>
 const tg = window.Telegram?.WebApp;
-if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor?.('#080a0d'); tg.setBackgroundColor?.('#080a0d'); }
+if (tg && tg.initData !== undefined) document.documentElement.classList.add('in-tg');
+if (tg) { tg.ready(); tg.setHeaderColor?.('#080a0d'); tg.setBackgroundColor?.('#080a0d'); }
 const buzz = (s='light') => tg?.HapticFeedback?.impactOccurred?.(s);
 
 // ── THE NINE ───────────────────────────────────────────────────────────────
@@ -642,6 +652,7 @@ document.getElementById('stopBtn').addEventListener('click', stop);
   s.classList.remove('live');
   deckLbl.textContent = 'Signal lost';
 }));
+document.getElementById('backBtn')?.addEventListener('click',()=>{ try{ window.Telegram?.WebApp?.close?.(); }catch(e){} });
 </script>
 </body>
 </html>
