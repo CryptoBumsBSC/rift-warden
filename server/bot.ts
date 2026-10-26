@@ -4829,7 +4829,7 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: 'You protect a community member from being picked on. Decide if the message below is hostile toward the protected member: insults, mockery, put-downs, sarcasm meant to demean, harassment, sexual remarks, threats, belittling them, or stirring others up against them. Friendly or neutral messages, questions and compliments are NOT hostile. ' +
+        { role: "system", content: 'You protect a community member from being picked on. Decide if the message below is hostile toward the protected member: insults, mockery, put-downs, sarcasm meant to demean, harassment, sexual remarks, threats, belittling them, or stirring others up against them. Mockery counts even when it is dressed up as a joke or said "just for fun". Friendly banter, neutral messages, questions and compliments are NOT hostile. ' +
           (nameOnly ? (threadHit || pronounHit
             ? `The message was not sent to them directly and may not name them. It sits in a conversation about the protected member (${threadHit ? "it replies inside a thread under their posts" : "they posted a few minutes ago and it uses pronoun words (she/her or he/him)"}). Set about_protected true if it is plausibly about them. `
             : `The message was not sent to them directly. It may mention their name (${protectedWords(targeted).join(", ")}), which could also belong to someone else. Set about_protected true ONLY if it is clearly about the protected member. `) : "It is aimed at the protected member. ") +
@@ -4873,6 +4873,8 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
   try {
     let r = await addOffense(chat.id, from.id);
     if (!r.shouldBan && r.offenseCount <= PROTECTED_MUTE_STEP) r = await addOffense(chat.id, from.id);
+    // The owner gets one step tougher: first offence is already a 24-hour mute.
+    if (targeted.username?.toLowerCase() === "aussieboomer" && !r.shouldBan && r.offenseCount <= PROTECTED_MUTE_STEP + 1) r = await addOffense(chat.id, from.id);
     const who = from.username ? `@${from.username}` : (from.first_name || "A member");
     if (r.shouldBan) {
       await ctx.api.banChatMember(chat.id, from.id);
