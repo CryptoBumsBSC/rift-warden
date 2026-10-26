@@ -68,7 +68,17 @@ var AUSTRALIA_PLACE_ID = 6744;
 var SEEN_KEY = "w:wildlife:seen";
 var SEEN_DAYS = 60;
 var OK_LICENCES = /* @__PURE__ */ new Set(["cc0", "cc-by", "cc-by-sa"]);
-var STATUS_NAMES = { CR: "Critically Endangered", EN: "Endangered", VU: "Vulnerable" };
+function statusName(cs) {
+  if (!cs) return null;
+  const code = String(cs.status || "").toLowerCase();
+  if (code === "cr" || code === "ce") return "Critically Endangered";
+  if (code === "en" || code === "e") return "Endangered";
+  if (code === "vu" || code === "v") return "Vulnerable";
+  if (cs.iucn === 50) return "Critically Endangered";
+  if (cs.iucn === 40) return "Endangered";
+  if (cs.iucn === 30) return "Vulnerable";
+  return null;
+}
 var LICENCE_NAMES = { "cc0": "CC0", "cc-by": "CC BY", "cc-by-sa": "CC BY-SA" };
 var UA = { "User-Agent": "RiftWardenBot/1.0 (Boomerverse community; conservation awareness posts)" };
 async function getJson(url) {
@@ -133,7 +143,7 @@ ${extract.slice(0, 3500)}` }
 var wildlifeDebug = {};
 async function pickWildlifePost() {
   const seen = await recentlySeen();
-  const page = 1 + Math.floor(Math.random() * 6);
+  const page = 1 + Math.floor(Math.random() * 20);
   const data = await getJson(
     `https://api.inaturalist.org/v1/observations/species_counts?place_id=${AUSTRALIA_PLACE_ID}&threatened=true&rank=species&preferred_place_id=${AUSTRALIA_PLACE_ID}&locale=en&per_page=100&page=${page}`
   );
@@ -141,7 +151,7 @@ async function pickWildlifePost() {
   wildlifeDebug.fetched = results.length;
   wildlifeDebug.apiOk = !!data;
   wildlifeDebug.total = data?.total_results;
-  wildlifeDebug.sample = results.slice(0, 3).map((r) => ({ n: r.taxon?.name, cs: r.taxon?.conservation_status?.status, lic: r.taxon?.default_photo?.license_code, wiki: !!r.taxon?.wikipedia_url, common: r.taxon?.preferred_common_name }));
+  wildlifeDebug.sample = results.slice(0, 3).map((r) => ({ n: r.taxon?.name, cs: r.taxon?.conservation_status, lic: r.taxon?.default_photo?.license_code, wiki: !!r.taxon?.wikipedia_url, common: r.taxon?.preferred_common_name }));
   const why = {};
   const bump = (k) => {
     why[k] = (why[k] || 0) + 1;
@@ -158,8 +168,8 @@ async function pickWildlifePost() {
       bump("seen");
       continue;
     }
-    const code = t.conservation_status?.status;
-    if (!STATUS_NAMES[code]) {
+    const statusLabel = statusName(t.conservation_status);
+    if (!statusLabel) {
       bump("status");
       continue;
     }
@@ -172,7 +182,7 @@ async function pickWildlifePost() {
       bump("nowiki");
       continue;
     }
-    if (++tried > 10) break;
+    if (++tried > 12) break;
     const title = decodeURIComponent(String(t.wikipedia_url).split("/wiki/")[1] || "");
     if (!title) continue;
     const wiki = await getJson(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
@@ -187,7 +197,7 @@ async function pickWildlifePost() {
       bump("photocheck");
       continue;
     }
-    const status = STATUS_NAMES[code];
+    const status = statusLabel;
     const body = await condense(t.preferred_common_name, t.name, status, extract);
     if (!body) {
       bump("condense");
