@@ -5483,6 +5483,36 @@ async function privateOwnerReply(ctx, text2) {
     }
   }
 }
+var ATALL_RE = /(^|\s)@all\b/i;
+var ATALL_KEY = (chatId) => `w:atall:${chatId}`;
+function isAnnouncer(from) {
+  if (!from) return false;
+  const ids = [GLOBAL_OWNER_USER_ID, process.env.TREEFITTY_USER_ID || ""].filter(Boolean);
+  if (ids.includes(String(from.id))) return true;
+  const u = (from.username || "").toLowerCase();
+  return u === "aussieboomer" || u === "treefitty";
+}
+async function handleAtAll(ctx, text2, messageId) {
+  const chat = ctx.chat, from = ctx.from;
+  if (!chat || !from || chat.id >= 0 || !ctx.message || !ATALL_RE.test(text2) || !isAnnouncer(from)) return;
+  try {
+    const prev = await stateGet(ATALL_KEY(chat.id), null);
+    if (prev) {
+      try {
+        await ctx.api.unpinChatMessage(chat.id, prev);
+      } catch {
+      }
+    }
+    await ctx.api.pinChatMessage(chat.id, messageId, { disable_notification: false });
+    await stateSet(ATALL_KEY(chat.id), messageId, 30 * 24 * 60 * 60);
+  } catch (e) {
+    try {
+      await ctx.api.sendMessage(from.id, "I could not pin your @all message. Please give me the 'Pin messages' admin right in the group.");
+    } catch {
+    }
+    console.log("@all pin failed:", e);
+  }
+}
 var EVENT_KEY = (chatId) => `w:event:${chatId}`;
 var EVENT_DEFAULT_TZ = "Australia/Hobart";
 function eventTzOffsetMs(utc, tz) {
@@ -10073,6 +10103,7 @@ Admins, please review!`,
     const hasFullCommunityTrust = communityTrust === "full";
     const hasTrustedCommunityTrust = communityTrust === "trusted";
     if (chatId && chatId < 0) await captureProtectedId(ctx);
+    if (chatId && chatId < 0) await handleAtAll(ctx, text2, ctx.message.message_id);
     if (chatId && chatId < 0 && communityTrust !== "full") {
       if (await holdEventRules(ctx, text2, ctx.message.message_id)) return;
       if (await holdProtectedHarassment(ctx, text2, ctx.message.message_id) || await holdProjectAccusation(ctx, text2, ctx.message.message_id)) return;
