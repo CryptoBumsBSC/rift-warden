@@ -5021,6 +5021,54 @@ async function privateOwnerReply(ctx: MyContext, text: string): Promise<void> {
 
 
 
+// === OWN BANNED WORDS AND SLUR WORDS (set only by the owner, TreeFitty and @aussieboomer; apply in every group) ===
+const BANWORDS_KEY = "w:banwords";
+const SLURWORDS_KEY = "w:slurwords";
+function ownListHit(text: string, words: string[]): string | null {
+  const n = projNorm(text);
+  const runs: string[] = [];
+  let cur = "";
+  for (const t of n.split(/[\s._\-*]+/)) {
+    if (/^[a-z0-9]$/.test(t)) cur += t;
+    else { if (cur.length >= 3) runs.push(cur); cur = ""; }
+  }
+  if (cur.length >= 3) runs.push(cur);
+  for (const w of words) {
+    const x = projNorm(w);
+    const esc = x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    if (new RegExp(`(^|[^a-z0-9])${esc}(s|es)?([^a-z0-9]|$)`, "i").test(n)) return w;
+    const xc = x.replace(/[^a-z0-9]/g, "");
+    if (xc.length >= 3 && runs.some(r => r.includes(xc))) return w;
+  }
+  return null;
+}
+async function holdOwnWords(ctx: MyContext, text: string, messageId: number): Promise<boolean> {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot || chat.id >= 0 || !text) return false;
+  const slurs = await stateGet<string[]>(SLURWORDS_KEY, []);
+  const banned = await stateGet<string[]>(BANWORDS_KEY, []);
+  if (!slurs.length && !banned.length) return false;
+  const slurHit = slurs.length ? ownListHit(text, slurs) : null;
+  const banHit = !slurHit && banned.length ? ownListHit(text, banned) : null;
+  if (!slurHit && !banHit) return false;
+  const people = await getProtected(chat.id);
+  if (people.some(p => (p.id && p.id === String(from.id)) || (p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase()))) return false;
+  if (isAnnouncer(from) || await isUserAdmin(ctx, from.id)) return false;
+  try { await ctx.api.deleteMessage(chat.id, messageId); } catch {}
+  let action = "delete";
+  if (slurHit) {
+    try {
+      await ctx.api.banChatMember(chat.id, from.id); action = "ban";
+      const who = from.username ? `@${from.username}` : (from.first_name || "A member");
+      await ctx.api.sendMessage(chat.id, `${who} removed. Keep it kind in here.`);
+      await alertProtectedOwners(ctx.api, `SLUR WORD BAN\nGroup: ${chat.title || chat.id}\nBanned: ${who}\nMessage: ${text.slice(0, 300)}`);
+    } catch (e) { console.log("Slur word ban failed:", e); }
+  }
+  await logViolation(String(chat.id), String(from.id), from.username || "", slurHit ? "slur_word" : "banned_word", text.slice(0, 120), slurHit ? "Slur word from the owner's list" : "Banned word from the owner's list", action);
+  await incrementModStat(String(chat.id), "messagesBlocked");
+  return true;
+}
+
 // === @all ANNOUNCEMENTS ===
 // When the owner, TreeFitty or @aussieboomer posts a message containing @all, it is pinned with a notification so every member is told.
 const ATALL_RE = /(^|\s)@all\b/i;
@@ -5194,7 +5242,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -7412,6 +7460,29 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     await stateSet(PROJWORDS_KEY(ctx.chat.id), list, 5 * 365 * 24 * 60 * 60);
     await privateOwnerReply(ctx, `Removed "${w}" from your extra words. The built-in words stay.`);
   });
+
+  const ownWordCommand = (cmd: string, key: string, label: string, effect: string) => {
+    bot.command(cmd, async (ctx) => {
+      if (!isAnnouncer(ctx.from)) return;
+      const w = (ctx.match || "").toString().trim().toLowerCase().slice(0, 40);
+      const list = await stateGet<string[]>(key, []);
+      if (!w) { await privateOwnerReply(ctx, `Your ${label}: ${list.length ? list.join(", ") : "none yet"}.\n\nAdd: /${cmd} word\nRemove: /un${cmd} word\n${effect}`); return; }
+      if (w.replace(/[^a-z0-9]/gi, "").length < 3) { await privateOwnerReply(ctx, `Use: /${cmd} word (at least 3 letters).`); return; }
+      if (list.length >= 300) { await privateOwnerReply(ctx, `You have 300 ${label}, which is the limit. Remove one first.`); return; }
+      if (!list.includes(w)) list.push(w);
+      await stateSet(key, list, 5 * 365 * 24 * 60 * 60);
+      await privateOwnerReply(ctx, `Added "${w}" to your ${label}. ${effect} Admins and protected people are never touched. It applies in every group.`);
+    });
+    bot.command("un" + cmd, async (ctx) => {
+      if (!isAnnouncer(ctx.from)) return;
+      const w = (ctx.match || "").toString().trim().toLowerCase();
+      const list = (await stateGet<string[]>(key, [])).filter(x => x !== w);
+      await stateSet(key, list, 5 * 365 * 24 * 60 * 60);
+      await privateOwnerReply(ctx, `Removed "${w}" from your ${label}.`);
+    });
+  };
+  ownWordCommand("banword", BANWORDS_KEY, "banned words", "Any message with it is deleted at once, with no penalty.");
+  ownWordCommand("slur", SLURWORDS_KEY, "slur words", "Any message with it is deleted and the sender is banned.");
 
   bot.command("event", async (ctx) => {
     if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
@@ -10279,6 +10350,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     if (chatId && chatId < 0) await captureProtectedId(ctx);
     if (chatId && chatId < 0) await handleAtAll(ctx, text, ctx.message.message_id);
     if (chatId && chatId < 0 && communityTrust !== "full") {
+      if (await holdOwnWords(ctx, text, ctx.message.message_id)) return;
       if (await holdEventRules(ctx, text, ctx.message.message_id)) return;
       if ((await holdProtectedHarassment(ctx, text, ctx.message.message_id) || await holdProjectAccusation(ctx, text, ctx.message.message_id))) return;
       if (await recheckNameImpersonation(ctx)) return;
