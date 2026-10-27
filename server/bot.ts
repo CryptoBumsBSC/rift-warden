@@ -4663,7 +4663,7 @@ const WILDLIFE_CFG = (chatId: string | number) => `w:wildlife:cfg:${chatId}`;
 // === PROTECTED MEMBERS ===
 // People the owners never want picked on. Anyone replying to, mentioning or
 // targeting a protected member with insults or mockery is removed and muted.
-interface ProtectedMember { id?: string; username?: string; first?: string; last?: string; names?: string[]; label: string; male?: boolean; }
+interface ProtectedMember { id?: string; username?: string; first?: string; last?: string; names?: string[]; label: string; male?: boolean; auto?: boolean; }
 const PROTECTED_KEY = (chatId: string | number) => `w:protected:${chatId}`;
 const PROTECTED_DEFAULT: ProtectedMember[] = [{ username: "RealAshleyWard", label: "@RealAshleyWard" }];
 
@@ -4684,6 +4684,24 @@ async function getProtected(chatId: string | number): Promise<ProtectedMember[]>
 }
 async function saveProtected(chatId: string | number, list: ProtectedMember[]): Promise<void> {
   await stateSet(PROTECTED_KEY(chatId), list, 5 * 365 * 24 * 60 * 60);
+}
+
+// Every group admin is protected from direct attacks (replies to them, @mentions of them) without being added by hand.
+// The list is cached for 10 minutes. Name-only and she/he matching stays with the hand-added people.
+async function adminProtected(api: Bot<MyContext>["api"], chatId: string | number, explicit: ProtectedMember[]): Promise<ProtectedMember[]> {
+  const key = `w:adminprot:${chatId}`;
+  let admins = await stateGet<ProtectedMember[] | null>(key, null);
+  if (!admins) {
+    admins = [];
+    try {
+      for (const a of await api.getChatAdministrators(chatId)) {
+        if (a.user.is_bot) continue;
+        admins.push({ id: String(a.user.id), username: a.user.username, first: a.user.first_name, last: a.user.last_name, label: a.user.username ? `@${a.user.username}` : (a.user.first_name || String(a.user.id)), auto: true });
+      }
+    } catch {}
+    await stateSet(key, admins, 10 * 60);
+  }
+  return admins.filter(a => !explicit.some(p => (p.id && p.id === a.id) || (p.username && a.username && p.username.toLowerCase() === a.username.toLowerCase())));
 }
 
 // Who may change the protected list: the two owners, plus anyone listed in
@@ -4780,7 +4798,8 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
   const from = ctx.from, chat = ctx.chat, msg = ctx.message ?? ctx.editedMessage;
   const wasEdit = !ctx.message;
   if (!from || !chat || !msg || from.is_bot || chat.id >= 0) return false;
-  const list = await getProtected(chat.id);
+  const explicit = await getProtected(chat.id);
+  const list = [...explicit, ...(await adminProtected(ctx.api, chat.id, explicit))];
   if (!list.length) return false;
   // Protected people can say what they like; so can admins.
   if (list.some(p => (p.id && p.id === String(from.id)) || (p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase()))) return false;
@@ -4796,8 +4815,8 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
   if (!targeted) {
     // Not tagged or replied to: look for her name or a nickname, or a reply to a message that names her.
     const quoted = String((msg.reply_to_message as any)?.text || (msg.reply_to_message as any)?.caption || "");
-    targeted = list.find(p => protectedWords(p).some(w => wordIn(text, w))) ||
-      (quoted ? list.find(p => protectedWords(p).some(w => wordIn(quoted, w)) || (p.username && quoted.toLowerCase().includes("@" + p.username.toLowerCase()))) : undefined);
+    targeted = explicit.find(p => protectedWords(p).some(w => wordIn(text, w))) ||
+      (quoted ? explicit.find(p => protectedWords(p).some(w => wordIn(quoted, w)) || (p.username && quoted.toLowerCase().includes("@" + p.username.toLowerCase()))) : undefined);
     nameOnly = !!targeted;
   }
   let threadHit = false, pronounHit = false;
@@ -4807,7 +4826,7 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
     const replyId = msg.reply_to_message?.message_id;
     threadHit = !!replyId && track.ids.includes(replyId);
     pronounHit = !threadHit && (track.male ? PROTECTED_PRONOUNS_MALE : PROTECTED_PRONOUNS).test(text) && Date.now() - track.lastHer < 15 * 60 * 1000;
-    if (threadHit || pronounHit) { targeted = list.find(p => p.label === track.who) || list[0]; nameOnly = true; }
+    if (threadHit || pronounHit) { targeted = explicit.find(p => p.label === track.who) || explicit[0]; nameOnly = true; }
   } else if (msg.reply_to_message?.message_id && track.ids.includes(msg.reply_to_message.message_id)) {
     threadHit = true;
   }
@@ -4932,11 +4951,12 @@ async function holdProjectAccusation(ctx: MyContext, text: string, messageId: nu
   const extraHit = extraWords.some(w => { const x = projNorm(w); return n.includes(x) || compact.includes(x.replace(/[^a-z]/g, "")); });
   if (!PROJ_ACCUSE_RE.test(n) && !PROJ_ACCUSE_RE.test(compact) && !extraHit) return false;
   const people = await getProtected(chat.id);
+  const aimedAt = [...people, ...(await adminProtected(ctx.api, chat.id, people))];
   // Protected people and admins may say what they like.
   if (people.some(p => (p.id && p.id === String(from.id)) || (p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase()))) return false;
   const names = Array.from(new Set([...PROJECT_NAMES_DEFAULT, ...people.flatMap(protectedWords)]));
   const repliedTo = msg.reply_to_message?.from;
-  const aimed = !!repliedTo && people.some(p => (p.id && p.id === String(repliedTo.id)) || (p.username && repliedTo.username && p.username.toLowerCase() === repliedTo.username.toLowerCase()));
+  const aimed = !!repliedTo && aimedAt.some(p => (p.id && p.id === String(repliedTo.id)) || (p.username && repliedTo.username && p.username.toLowerCase() === repliedTo.username.toLowerCase()));
   if (!aimed && !names.some(w => wordIn(n, projNorm(w)))) return false;
   if (await isUserAdmin(ctx, from.id)) return false;
 

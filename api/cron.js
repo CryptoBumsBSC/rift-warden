@@ -5359,6 +5359,22 @@ async function getProtected(chatId) {
 async function saveProtected(chatId, list) {
   await stateSet(PROTECTED_KEY(chatId), list, 5 * 365 * 24 * 60 * 60);
 }
+async function adminProtected(api, chatId, explicit) {
+  const key = `w:adminprot:${chatId}`;
+  let admins = await stateGet(key, null);
+  if (!admins) {
+    admins = [];
+    try {
+      for (const a of await api.getChatAdministrators(chatId)) {
+        if (a.user.is_bot) continue;
+        admins.push({ id: String(a.user.id), username: a.user.username, first: a.user.first_name, last: a.user.last_name, label: a.user.username ? `@${a.user.username}` : a.user.first_name || String(a.user.id), auto: true });
+      }
+    } catch {
+    }
+    await stateSet(key, admins, 10 * 60);
+  }
+  return admins.filter((a) => !explicit.some((p) => p.id && p.id === a.id || p.username && a.username && p.username.toLowerCase() === a.username.toLowerCase()));
+}
 function protectedManagerIds() {
   return (process.env.PROTECTED_MANAGER_USER_IDS || "").split(",").map((x) => x.trim()).filter(Boolean);
 }
@@ -5458,7 +5474,8 @@ async function holdProtectedHarassment(ctx, text2, messageId) {
   const from = ctx.from, chat = ctx.chat, msg = ctx.message ?? ctx.editedMessage;
   const wasEdit = !ctx.message;
   if (!from || !chat || !msg || from.is_bot || chat.id >= 0) return false;
-  const list = await getProtected(chat.id);
+  const explicit = await getProtected(chat.id);
+  const list = [...explicit, ...await adminProtected(ctx.api, chat.id, explicit)];
   if (!list.length) return false;
   if (list.some((p) => p.id && p.id === String(from.id) || p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase())) return false;
   const lower = text2.toLowerCase();
@@ -5469,7 +5486,7 @@ async function holdProtectedHarassment(ctx, text2, messageId) {
   let nameOnly = false;
   if (!targeted) {
     const quoted = String(msg.reply_to_message?.text || msg.reply_to_message?.caption || "");
-    targeted = list.find((p) => protectedWords(p).some((w) => wordIn(text2, w))) || (quoted ? list.find((p) => protectedWords(p).some((w) => wordIn(quoted, w)) || p.username && quoted.toLowerCase().includes("@" + p.username.toLowerCase())) : void 0);
+    targeted = explicit.find((p) => protectedWords(p).some((w) => wordIn(text2, w))) || (quoted ? explicit.find((p) => protectedWords(p).some((w) => wordIn(quoted, w)) || p.username && quoted.toLowerCase().includes("@" + p.username.toLowerCase())) : void 0);
     nameOnly = !!targeted;
   }
   let threadHit = false, pronounHit = false;
@@ -5479,7 +5496,7 @@ async function holdProtectedHarassment(ctx, text2, messageId) {
     threadHit = !!replyId && track.ids.includes(replyId);
     pronounHit = !threadHit && (track.male ? PROTECTED_PRONOUNS_MALE : PROTECTED_PRONOUNS).test(text2) && Date.now() - track.lastHer < 15 * 60 * 1e3;
     if (threadHit || pronounHit) {
-      targeted = list.find((p) => p.label === track.who) || list[0];
+      targeted = explicit.find((p) => p.label === track.who) || explicit[0];
       nameOnly = true;
     }
   } else if (msg.reply_to_message?.message_id && track.ids.includes(msg.reply_to_message.message_id)) {
@@ -5631,10 +5648,11 @@ async function holdProjectAccusation(ctx, text2, messageId) {
   });
   if (!PROJ_ACCUSE_RE.test(n) && !PROJ_ACCUSE_RE.test(compact) && !extraHit) return false;
   const people = await getProtected(chat.id);
+  const aimedAt = [...people, ...await adminProtected(ctx.api, chat.id, people)];
   if (people.some((p) => p.id && p.id === String(from.id) || p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase())) return false;
   const names = Array.from(/* @__PURE__ */ new Set([...PROJECT_NAMES_DEFAULT, ...people.flatMap(protectedWords)]));
   const repliedTo = msg.reply_to_message?.from;
-  const aimed = !!repliedTo && people.some((p) => p.id && p.id === String(repliedTo.id) || p.username && repliedTo.username && p.username.toLowerCase() === repliedTo.username.toLowerCase());
+  const aimed = !!repliedTo && aimedAt.some((p) => p.id && p.id === String(repliedTo.id) || p.username && repliedTo.username && p.username.toLowerCase() === repliedTo.username.toLowerCase());
   if (!aimed && !names.some((w) => wordIn(n, projNorm(w)))) return false;
   if (await isUserAdmin(ctx, from.id)) return false;
   let accuses = false, imposter = false, confident = false, reason = "";
