@@ -4860,7 +4860,8 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
   } catch { return false; } // fail open
   if (threadHit || (hostile && aboutThem)) await trackMsg();
   if (!hostile || !aboutThem) return false;
-  if (!confident) {
+  const strictEvent = await eventOn(chat.id);
+  if (!confident && !strictEvent) {
     // Not sure enough to act: tell the owners privately and leave the message.
     const who = from.username ? `@${from.username}` : (from.first_name || String(from.id));
     for (const id of protectedAlertIds()) {
@@ -4888,6 +4889,7 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
     if (!r.shouldBan && r.offenseCount <= PROTECTED_MUTE_STEP) r = await addOffense(chat.id, from.id);
     // The owner gets one step tougher: first offence is already a 24-hour mute.
     if (targeted.username?.toLowerCase() === "aussieboomer" && !r.shouldBan && r.offenseCount <= PROTECTED_MUTE_STEP + 1) r = await addOffense(chat.id, from.id);
+    if (strictEvent && !r.shouldBan) r = await addOffense(chat.id, from.id); // one step tougher during an event
     const who = from.username ? `@${from.username}` : (from.first_name || "A member");
     if (r.shouldBan) {
       await ctx.api.banChatMember(chat.id, from.id);
@@ -4958,7 +4960,8 @@ async function holdProjectAccusation(ctx: MyContext, text: string, messageId: nu
     reason = String(v.reason || "accusation against the project or its people").slice(0, 100);
   } catch { return false; } // fail open
   if (!accuses || imposter) return false;
-  if (!confident) {
+  const strict = await eventOn(chat.id);
+  if (!confident && !strict) {
     const who = from.username ? `@${from.username}` : (from.first_name || String(from.id));
     await alertProtectedOwners(ctx.api, `PROJECT ALERT (no action taken)\nGroup: ${chat.title || chat.id}\nFrom: ${who}\nMessage: ${text.slice(0, 500)}\n\nThis may accuse the project or its people of dishonesty, but I wasn't sure enough to remove it. Please check.`);
     return false;
@@ -4968,10 +4971,11 @@ async function holdProjectAccusation(ctx: MyContext, text: string, messageId: nu
   let action = "delete";
   try {
     const count = await stateIncr(PROJACCUSE_KEY(chat.id, from.id), 30 * 24 * 60 * 60);
-    if (count <= 1) {
+    if (count <= 1 && !strict) {
       await ctx.api.sendMessage(chat.id, `${who}, that message was removed. Honest questions are always welcome, but calling the project or its people a scam or a con isn't. If you have a genuine concern, tell the admins and it will be looked at.`);
     } else {
-      const r = await addOffense(chat.id, from.id);
+      let r = await addOffense(chat.id, from.id);
+      if (strict && !r.shouldBan) r = await addOffense(chat.id, from.id);
       if (r.shouldBan) { await ctx.api.banChatMember(chat.id, from.id); await ctx.api.sendMessage(chat.id, `${who} removed. Keep it kind in here.`); action = "ban"; }
       else {
         await ctx.api.restrictChatMember(chat.id, from.id, { can_send_messages: false, can_send_other_messages: false, can_send_polls: false, can_add_web_page_previews: false },
@@ -4993,6 +4997,90 @@ async function privateOwnerReply(ctx: MyContext, text: string): Promise<void> {
   try { if (ctx.chat && ctx.message) await ctx.api.deleteMessage(ctx.chat.id, ctx.message.message_id); } catch {}
   try { if (ctx.from) await ctx.api.sendMessage(ctx.from.id, text); }
   catch { try { if (ctx.chat) await ctx.api.sendMessage(ctx.chat.id, "Done. (Open a private chat with me and send /start to get replies privately.)"); } catch {} }
+}
+
+
+// === EVENT MODE (timed lockdown for launch day or a big public event) ===
+// An admin sets a start date, time and length. While it runs: members in their first hour cannot post, non-admins cannot
+// post links or files, and the protected-person and project checks are stricter. Admins and protected people are never touched.
+interface EventWindow { start: number; end: number; tz: string; startSent?: boolean; endSent?: boolean }
+const EVENT_KEY = (chatId: number | string) => `w:event:${chatId}`;
+const EVENT_DEFAULT_TZ = "Australia/Hobart";
+function eventTzOffsetMs(utc: number, tz: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(utc));
+  const g = (t: string) => Number(parts.find(x => x.type === t)!.value);
+  return Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"), g("second")) - utc;
+}
+function eventZonedToUtc(y: number, mo: number, d: number, h: number, mi: number, tz: string): number {
+  const guess = Date.UTC(y, mo - 1, d, h, mi);
+  let utc = guess - eventTzOffsetMs(guess, tz);
+  utc = guess - eventTzOffsetMs(utc, tz);
+  return utc;
+}
+function eventFmtLocal(ms: number, tz: string): string {
+  return new Intl.DateTimeFormat("en-AU", { timeZone: tz, weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(ms)) + ` (${tz})`;
+}
+function parseEventArg(arg: string): EventWindow | string {
+  const m = arg.trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})\s+(\d+)\s*(m|h|d)\b\s*(\S+)?$/i);
+  if (!m) return "bad";
+  const tz = m[8] || EVENT_DEFAULT_TZ;
+  try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); } catch { return "tz"; }
+  const [y, mo, d, h, mi] = [m[1], m[2], m[3], m[4], m[5]].map(Number);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59) return "bad";
+  const unit = m[7].toLowerCase(), n = Number(m[6]);
+  const len = n * (unit === "m" ? 60 : unit === "h" ? 3600 : 86400) * 1000;
+  if (len < 10 * 60 * 1000 || len > 7 * 86400 * 1000) return "len";
+  const start = eventZonedToUtc(y, mo, d, h, mi, tz);
+  return { start, end: start + len, tz };
+}
+async function getEventWindow(chatId: number | string): Promise<EventWindow | null> {
+  return await stateGet<EventWindow | null>(EVENT_KEY(chatId), null);
+}
+async function eventOn(chatId: number | string): Promise<boolean> {
+  const e = await getEventWindow(chatId);
+  const now = Date.now();
+  return !!e && now >= e.start && now < e.end;
+}
+const EVENT_LINK_RE = /(https?:\/\/|www\.|t\.me\/|\b[a-z0-9-]+\.(com|io|xyz|net|org|app|gg|me|co|ly|finance|money|live)\b)/i;
+
+async function holdEventRules(ctx: MyContext, text: string, messageId: number, media = false): Promise<boolean> {
+  const from = ctx.from, chat = ctx.chat, msg: any = ctx.message ?? ctx.editedMessage;
+  if (!from || !chat || !msg || from.is_bot || chat.id >= 0 || !ctx.message) return false;
+  if (!(await eventOn(chat.id))) return false;
+  const people = await getProtected(chat.id);
+  if (people.some(p => (p.id && p.id === String(from.id)) || (p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase()))) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  let why = "";
+  try {
+    const st = await getUserModerationStatus(String(from.id), String(chat.id));
+    const joined = st?.joinDate ? new Date(st.joinDate).getTime() : 0;
+    if (joined && Date.now() - joined < 60 * 60 * 1000) why = "New member (first hour) posted during an event";
+  } catch {}
+  if (!why && media) why = "File or picture from a non-admin during an event";
+  if (!why && (EVENT_LINK_RE.test(text) || (msg.entities || msg.caption_entities || []).some((e: any) => e.type === "url" || e.type === "text_link"))) why = "Link from a non-admin during an event";
+  if (!why) return false;
+  try { await ctx.api.deleteMessage(chat.id, messageId); } catch {}
+  await logViolation(String(chat.id), String(from.id), from.username || "", "event_rule", text.slice(0, 120), why, "delete");
+  await incrementModStat(String(chat.id), "messagesBlocked");
+  return true;
+}
+
+async function eventCronNotices(api: Bot<MyContext>["api"], chatId: number): Promise<string | null> {
+  const ev = await getEventWindow(chatId);
+  if (!ev) return null;
+  const now = Date.now();
+  if (now >= ev.end) {
+    if (ev.endSent) return null;
+    await stateSet(EVENT_KEY(chatId), { ...ev, startSent: true, endSent: true }, 7 * 24 * 60 * 60);
+    if (ev.startSent) await api.sendMessage(chatId, "Event mode has ended. Thank you for keeping it kind.").catch(() => {});
+    return `event-end:${chatId}`;
+  }
+  if (now >= ev.start && !ev.startSent) {
+    await stateSet(EVENT_KEY(chatId), { ...ev, startSent: true }, Math.ceil((ev.end - now) / 1000) + 7 * 24 * 60 * 60);
+    await api.sendMessage(chatId, `Event mode is ON until ${eventFmtLocal(ev.end, ev.tz)}.\nExtra care is in place: new members cannot post for their first hour, links and files from non-admins are removed, and the Warden is stricter. Admins are never affected.`).catch(() => {});
+    return `event-start:${chatId}`;
+  }
+  return null;
 }
 
 // === BOT SETUP ===
@@ -5060,7 +5148,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -7277,6 +7365,36 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     const list = (await stateGet<string[]>(PROJWORDS_KEY(ctx.chat.id), [])).filter(x => x !== w);
     await stateSet(PROJWORDS_KEY(ctx.chat.id), list, 5 * 365 * 24 * 60 * 60);
     await privateOwnerReply(ctx, `Removed "${w}" from your extra words. The built-in words stay.`);
+  });
+
+  bot.command("event", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const arg = (ctx.match || "").toString().trim();
+    const cur = await getEventWindow(ctx.chat.id);
+    const now = Date.now();
+    if (!arg) {
+      if (!cur || cur.end <= now) { await privateOwnerReply(ctx, "No event is set.\n\nTo set one, send in the group:\n/event 2026-11-05 19:00 3h\n(date YYYY-MM-DD, time 24-hour, length like 90m, 3h or 1d; Tasmania time unless you add a zone such as America/New_York at the end)"); return; }
+      await privateOwnerReply(ctx, `Event ${now >= cur.start ? "is ON now" : "is set"}.\nStarts: ${eventFmtLocal(cur.start, cur.tz)}\nEnds: ${eventFmtLocal(cur.end, cur.tz)}\n\n/eventoff cancels it.`); return;
+    }
+    const ev = parseEventArg(arg);
+    if (typeof ev === "string") {
+      await privateOwnerReply(ctx, ev === "tz" ? "I don't know that time zone. Use a name like Australia/Sydney or America/New_York." :
+        ev === "len" ? "An event must be between 10 minutes and 7 days long." :
+        "I couldn't read that. Send it like this:\n/event 2026-11-05 19:00 3h\n(date YYYY-MM-DD, time 24-hour, length like 90m, 3h or 1d)");
+      return;
+    }
+    if (ev.end <= now) { await privateOwnerReply(ctx, "That event is already over. Check the date."); return; }
+    await stateSet(EVENT_KEY(ctx.chat.id), ev, Math.max(24 * 60 * 60, Math.ceil((ev.end - now) / 1000) + 7 * 24 * 60 * 60));
+    await privateOwnerReply(ctx, `Event mode set.\nStarts: ${eventFmtLocal(ev.start, ev.tz)}\nEnds: ${eventFmtLocal(ev.end, ev.tz)}\n\nWhile it runs: new members cannot post for their first hour, links and files from non-admins are removed, and the Warden is stricter. Admins are never touched. The group gets a notice at the start and the end (within about 5 minutes of the time).\n\n/event shows it. /eventoff cancels it.`);
+  });
+
+  bot.command("eventoff", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const cur = await getEventWindow(ctx.chat.id);
+    if (!cur) { await privateOwnerReply(ctx, "No event is set."); return; }
+    await stateDel(EVENT_KEY(ctx.chat.id));
+    if (Date.now() >= cur.start && Date.now() < cur.end) await ctx.api.sendMessage(ctx.chat.id, "Event mode has ended.").catch(() => {});
+    await privateOwnerReply(ctx, "Event cancelled.");
   });
 
   bot.command("projectprotect", async (ctx) => {
@@ -9648,6 +9766,12 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
   // drive-by spam and scam-image raids without keeping anyone out for long.
   const NEW_MEMBER_MEDIA_HOURS = 1;
   // GIFs are allowed for everyone from the first minute (repeat-post and caption checks still apply).
+  // Event mode: pictures and files from non-admins are removed while an event runs.
+  bot.on(["message:photo", "message:video", "message:document", "message:animation", "message:video_note"], async (ctx, next) => {
+    if (ctx.chat && ctx.chat.id < 0 && ctx.message && (await holdEventRules(ctx, "", ctx.message.message_id, true))) return;
+    await next();
+  });
+
   bot.on(["message:photo", "message:video", "message:video_note"], async (ctx, next) => {
     const chatId = ctx.chat?.id;
     const from = ctx.from;
@@ -10108,6 +10232,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     // may post links and pictures, but are still checked for scams.
     if (chatId && chatId < 0) await captureProtectedId(ctx);
     if (chatId && chatId < 0 && communityTrust !== "full") {
+      if (await holdEventRules(ctx, text, ctx.message.message_id)) return;
       if ((await holdProtectedHarassment(ctx, text, ctx.message.message_id) || await holdProjectAccusation(ctx, text, ctx.message.message_id))) return;
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
@@ -12237,6 +12362,14 @@ export async function runCronTick(): Promise<{ ran: string[] }> {
 
   try { await cleanupOldTrackedMessages(); ran.push("message-cleanup"); }
   catch (err) { console.error("[cron] message cleanup failed:", err); }
+
+  // Event mode start and end notices.
+  for (const chatId of Array.from(activeChats)) {
+    try {
+      const r = await eventCronNotices(bot.api, chatId);
+      if (r) ran.push(r);
+    } catch (err) { console.error("[cron] event notice failed:", err); }
+  }
 
   // Tell the admins if I've been given a badge but not the powers behind it.
   for (const chatId of Array.from(activeChats)) {

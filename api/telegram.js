@@ -5301,7 +5301,8 @@ async function holdProtectedHarassment(ctx, text2, messageId) {
   }
   if (threadHit || hostile && aboutThem) await trackMsg();
   if (!hostile || !aboutThem) return false;
-  if (!confident) {
+  const strictEvent = await eventOn(chat.id);
+  if (!confident && !strictEvent) {
     const who = from.username ? `@${from.username}` : from.first_name || String(from.id);
     for (const id of protectedAlertIds()) {
       try {
@@ -5342,6 +5343,7 @@ Message: ${text2.slice(0, 300)}`);
     let r = await addOffense(chat.id, from.id);
     if (!r.shouldBan && r.offenseCount <= PROTECTED_MUTE_STEP) r = await addOffense(chat.id, from.id);
     if (targeted.username?.toLowerCase() === "aussieboomer" && !r.shouldBan && r.offenseCount <= PROTECTED_MUTE_STEP + 1) r = await addOffense(chat.id, from.id);
+    if (strictEvent && !r.shouldBan) r = await addOffense(chat.id, from.id);
     const who = from.username ? `@${from.username}` : from.first_name || "A member";
     if (r.shouldBan) {
       await ctx.api.banChatMember(chat.id, from.id);
@@ -5416,7 +5418,8 @@ async function holdProjectAccusation(ctx, text2, messageId) {
     return false;
   }
   if (!accuses || imposter) return false;
-  if (!confident) {
+  const strict = await eventOn(chat.id);
+  if (!confident && !strict) {
     const who2 = from.username ? `@${from.username}` : from.first_name || String(from.id);
     await alertProtectedOwners(ctx.api, `PROJECT ALERT (no action taken)
 Group: ${chat.title || chat.id}
@@ -5434,10 +5437,11 @@ This may accuse the project or its people of dishonesty, but I wasn't sure enoug
   let action = "delete";
   try {
     const count = await stateIncr(PROJACCUSE_KEY(chat.id, from.id), 30 * 24 * 60 * 60);
-    if (count <= 1) {
+    if (count <= 1 && !strict) {
       await ctx.api.sendMessage(chat.id, `${who}, that message was removed. Honest questions are always welcome, but calling the project or its people a scam or a con isn't. If you have a genuine concern, tell the admins and it will be looked at.`);
     } else {
-      const r = await addOffense(chat.id, from.id);
+      let r = await addOffense(chat.id, from.id);
+      if (strict && !r.shouldBan) r = await addOffense(chat.id, from.id);
       if (r.shouldBan) {
         await ctx.api.banChatMember(chat.id, from.id);
         await ctx.api.sendMessage(chat.id, `${who} removed. Keep it kind in here.`);
@@ -5478,6 +5482,73 @@ async function privateOwnerReply(ctx, text2) {
     } catch {
     }
   }
+}
+var EVENT_KEY = (chatId) => `w:event:${chatId}`;
+var EVENT_DEFAULT_TZ = "Australia/Hobart";
+function eventTzOffsetMs(utc, tz) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(utc));
+  const g = (t) => Number(parts.find((x) => x.type === t).value);
+  return Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"), g("second")) - utc;
+}
+function eventZonedToUtc(y, mo, d, h, mi, tz) {
+  const guess = Date.UTC(y, mo - 1, d, h, mi);
+  let utc = guess - eventTzOffsetMs(guess, tz);
+  utc = guess - eventTzOffsetMs(utc, tz);
+  return utc;
+}
+function eventFmtLocal(ms, tz) {
+  return new Intl.DateTimeFormat("en-AU", { timeZone: tz, weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(ms)) + ` (${tz})`;
+}
+function parseEventArg(arg) {
+  const m = arg.trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})\s+(\d+)\s*(m|h|d)\b\s*(\S+)?$/i);
+  if (!m) return "bad";
+  const tz = m[8] || EVENT_DEFAULT_TZ;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+  } catch {
+    return "tz";
+  }
+  const [y, mo, d, h, mi] = [m[1], m[2], m[3], m[4], m[5]].map(Number);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59) return "bad";
+  const unit = m[7].toLowerCase(), n = Number(m[6]);
+  const len = n * (unit === "m" ? 60 : unit === "h" ? 3600 : 86400) * 1e3;
+  if (len < 10 * 60 * 1e3 || len > 7 * 86400 * 1e3) return "len";
+  const start = eventZonedToUtc(y, mo, d, h, mi, tz);
+  return { start, end: start + len, tz };
+}
+async function getEventWindow(chatId) {
+  return await stateGet(EVENT_KEY(chatId), null);
+}
+async function eventOn(chatId) {
+  const e = await getEventWindow(chatId);
+  const now = Date.now();
+  return !!e && now >= e.start && now < e.end;
+}
+var EVENT_LINK_RE = /(https?:\/\/|www\.|t\.me\/|\b[a-z0-9-]+\.(com|io|xyz|net|org|app|gg|me|co|ly|finance|money|live)\b)/i;
+async function holdEventRules(ctx, text2, messageId, media = false) {
+  const from = ctx.from, chat = ctx.chat, msg = ctx.message ?? ctx.editedMessage;
+  if (!from || !chat || !msg || from.is_bot || chat.id >= 0 || !ctx.message) return false;
+  if (!await eventOn(chat.id)) return false;
+  const people = await getProtected(chat.id);
+  if (people.some((p) => p.id && p.id === String(from.id) || p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase())) return false;
+  if (await isUserAdmin(ctx, from.id)) return false;
+  let why = "";
+  try {
+    const st = await getUserModerationStatus(String(from.id), String(chat.id));
+    const joined = st?.joinDate ? new Date(st.joinDate).getTime() : 0;
+    if (joined && Date.now() - joined < 60 * 60 * 1e3) why = "New member (first hour) posted during an event";
+  } catch {
+  }
+  if (!why && media) why = "File or picture from a non-admin during an event";
+  if (!why && (EVENT_LINK_RE.test(text2) || (msg.entities || msg.caption_entities || []).some((e) => e.type === "url" || e.type === "text_link"))) why = "Link from a non-admin during an event";
+  if (!why) return false;
+  try {
+    await ctx.api.deleteMessage(chat.id, messageId);
+  } catch {
+  }
+  await logViolation(String(chat.id), String(from.id), from.username || "", "event_rule", text2.slice(0, 120), why, "delete");
+  await incrementModStat(String(chat.id), "messagesBlocked");
+  return true;
 }
 function createBot() {
   const bot = new Bot(BOT_TOKEN);
@@ -5526,7 +5597,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -7335,6 +7406,53 @@ Use /wildlifeauto daily (every day at noon), /wildlifeauto twice (Tuesday and Sa
     const list = (await stateGet(PROJWORDS_KEY(ctx.chat.id), [])).filter((x) => x !== w);
     await stateSet(PROJWORDS_KEY(ctx.chat.id), list, 5 * 365 * 24 * 60 * 60);
     await privateOwnerReply(ctx, `Removed "${w}" from your extra words. The built-in words stay.`);
+  });
+  bot.command("event", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const arg = (ctx.match || "").toString().trim();
+    const cur = await getEventWindow(ctx.chat.id);
+    const now = Date.now();
+    if (!arg) {
+      if (!cur || cur.end <= now) {
+        await privateOwnerReply(ctx, "No event is set.\n\nTo set one, send in the group:\n/event 2026-11-05 19:00 3h\n(date YYYY-MM-DD, time 24-hour, length like 90m, 3h or 1d; Tasmania time unless you add a zone such as America/New_York at the end)");
+        return;
+      }
+      await privateOwnerReply(ctx, `Event ${now >= cur.start ? "is ON now" : "is set"}.
+Starts: ${eventFmtLocal(cur.start, cur.tz)}
+Ends: ${eventFmtLocal(cur.end, cur.tz)}
+
+/eventoff cancels it.`);
+      return;
+    }
+    const ev = parseEventArg(arg);
+    if (typeof ev === "string") {
+      await privateOwnerReply(ctx, ev === "tz" ? "I don't know that time zone. Use a name like Australia/Sydney or America/New_York." : ev === "len" ? "An event must be between 10 minutes and 7 days long." : "I couldn't read that. Send it like this:\n/event 2026-11-05 19:00 3h\n(date YYYY-MM-DD, time 24-hour, length like 90m, 3h or 1d)");
+      return;
+    }
+    if (ev.end <= now) {
+      await privateOwnerReply(ctx, "That event is already over. Check the date.");
+      return;
+    }
+    await stateSet(EVENT_KEY(ctx.chat.id), ev, Math.max(24 * 60 * 60, Math.ceil((ev.end - now) / 1e3) + 7 * 24 * 60 * 60));
+    await privateOwnerReply(ctx, `Event mode set.
+Starts: ${eventFmtLocal(ev.start, ev.tz)}
+Ends: ${eventFmtLocal(ev.end, ev.tz)}
+
+While it runs: new members cannot post for their first hour, links and files from non-admins are removed, and the Warden is stricter. Admins are never touched. The group gets a notice at the start and the end (within about 5 minutes of the time).
+
+/event shows it. /eventoff cancels it.`);
+  });
+  bot.command("eventoff", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const cur = await getEventWindow(ctx.chat.id);
+    if (!cur) {
+      await privateOwnerReply(ctx, "No event is set.");
+      return;
+    }
+    await stateDel(EVENT_KEY(ctx.chat.id));
+    if (Date.now() >= cur.start && Date.now() < cur.end) await ctx.api.sendMessage(ctx.chat.id, "Event mode has ended.").catch(() => {
+    });
+    await privateOwnerReply(ctx, "Event cancelled.");
   });
   bot.command("projectprotect", async (ctx) => {
     if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
@@ -9531,6 +9649,10 @@ I need ban permission to enforce this.`
     }
   });
   const NEW_MEMBER_MEDIA_HOURS = 1;
+  bot.on(["message:photo", "message:video", "message:document", "message:animation", "message:video_note"], async (ctx, next) => {
+    if (ctx.chat && ctx.chat.id < 0 && ctx.message && await holdEventRules(ctx, "", ctx.message.message_id, true)) return;
+    await next();
+  });
   bot.on(["message:photo", "message:video", "message:video_note"], async (ctx, next) => {
     const chatId = ctx.chat?.id;
     const from = ctx.from;
@@ -9952,6 +10074,7 @@ Admins, please review!`,
     const hasTrustedCommunityTrust = communityTrust === "trusted";
     if (chatId && chatId < 0) await captureProtectedId(ctx);
     if (chatId && chatId < 0 && communityTrust !== "full") {
+      if (await holdEventRules(ctx, text2, ctx.message.message_id)) return;
       if (await holdProtectedHarassment(ctx, text2, ctx.message.message_id) || await holdProjectAccusation(ctx, text2, ctx.message.message_id)) return;
       if (await recheckNameImpersonation(ctx)) return;
       if (await holdHiddenLink(ctx)) return;
