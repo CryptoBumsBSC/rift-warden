@@ -5399,7 +5399,7 @@ async function holdProjectAccusation(ctx, text2, messageId) {
   const from = ctx.from, chat = ctx.chat, msg = ctx.message ?? ctx.editedMessage;
   const wasEdit = !ctx.message;
   if (!from || !chat || !msg || from.is_bot || chat.id >= 0) return false;
-  if (!await stateGet(PROJPROT_KEY(chat.id), false)) return false;
+  if (!await stateGet(PROJPROT_KEY(chat.id), true)) return false;
   const n = projNorm(text2), compact = n.replace(/[^a-z]/g, "");
   const extraWords = await stateGet(PROJWORDS_KEY(chat.id), []);
   const extraHit = extraWords.some((w) => {
@@ -7509,7 +7509,7 @@ While it runs: new members cannot post for their first hour, links and files fro
       await stateSet(PROJPROT_KEY(ctx.chat.id), arg === "on", 5 * 365 * 24 * 60 * 60);
       await privateOwnerReply(ctx, arg === "on" ? "Project protection is ON. Posts calling the project, the owner or protected people a scam, con, fake or fraud are removed (first time with a friendly note, then mutes). Honest questions and fake-account warnings are left alone." : "Project protection is OFF.");
     } else {
-      const on = await stateGet(PROJPROT_KEY(ctx.chat.id), false);
+      const on = await stateGet(PROJPROT_KEY(ctx.chat.id), true);
       await privateOwnerReply(ctx, `Project protection is ${on ? "ON" : "OFF"}. Use /projectprotect on or /projectprotect off.`);
     }
   });

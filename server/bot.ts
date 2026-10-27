@@ -4945,7 +4945,7 @@ async function holdProjectAccusation(ctx: MyContext, text: string, messageId: nu
   const from = ctx.from, chat = ctx.chat, msg = ctx.message ?? ctx.editedMessage;
   const wasEdit = !ctx.message;
   if (!from || !chat || !msg || from.is_bot || chat.id >= 0) return false;
-  if (!(await stateGet<boolean>(PROJPROT_KEY(chat.id), false))) return false;
+  if (!(await stateGet<boolean>(PROJPROT_KEY(chat.id), true))) return false;
   const n = projNorm(text), compact = n.replace(/[^a-z]/g, "");
   const extraWords = await stateGet<string[]>(PROJWORDS_KEY(chat.id), []);
   const extraHit = extraWords.some(w => { const x = projNorm(w); return n.includes(x) || compact.includes(x.replace(/[^a-z]/g, "")); });
@@ -7452,7 +7452,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
         ? "Project protection is ON. Posts calling the project, the owner or protected people a scam, con, fake or fraud are removed (first time with a friendly note, then mutes). Honest questions and fake-account warnings are left alone."
         : "Project protection is OFF.");
     } else {
-      const on = await stateGet<boolean>(PROJPROT_KEY(ctx.chat.id), false);
+      const on = await stateGet<boolean>(PROJPROT_KEY(ctx.chat.id), true);
       await privateOwnerReply(ctx, `Project protection is ${on ? "ON" : "OFF"}. Use /projectprotect on or /projectprotect off.`);
     }
   });
