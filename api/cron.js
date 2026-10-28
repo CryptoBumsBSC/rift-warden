@@ -8139,6 +8139,25 @@ While it runs: new members cannot post for their first hour, links and files fro
     await stateSet(`w:tz:${ctx.from.id}`, tz, 5 * 365 * 24 * 60 * 60);
     await send(`Saved. Your time zone is ${tz.replace(/_/g, " ")}. Right now it is ${formatIn(Date.now(), tz)}.`);
   });
+  async function pinMeeting(ctx, messageId) {
+    try {
+      const key = `w:tcpin:${ctx.chat.id}`;
+      const prev = await stateGet(key, null);
+      if (prev && prev !== messageId) {
+        try {
+          await ctx.api.unpinChatMessage(ctx.chat.id, prev);
+        } catch {
+        }
+      }
+      await ctx.api.pinChatMessage(ctx.chat.id, messageId, { disable_notification: false });
+      await stateSet(key, messageId, 60 * 24 * 60 * 60);
+    } catch {
+      try {
+        await ctx.api.sendMessage(ctx.from.id, "I posted the meeting but could not pin it. Please give me the 'Pin messages' admin right in the group.");
+      } catch {
+      }
+    }
+  }
   bot.command("timeconvert", async (ctx) => {
     if (!ctx.from || !ctx.chat) return;
     if (ctx.chat.type === "private") {
@@ -8181,6 +8200,7 @@ Tap the button to see it in your own time zone.`,
           { reply_markup: { inline_keyboard: [[{ text: "Show my time", callback_data: `tc:${oldId}` }]] } }
         ).catch(() => {
         });
+        await pinMeeting(ctx, ctx.message.reply_to_message.message_id);
         return;
       }
       const id = Math.random().toString(36).slice(2, 10);
@@ -8189,7 +8209,7 @@ Tap the button to see it in your own time zone.`,
         await ctx.api.deleteMessage(ctx.chat.id, ctx.message.message_id);
       } catch {
       }
-      await ctx.api.sendMessage(
+      const sent = await ctx.api.sendMessage(
         ctx.chat.id,
         `${ev.title}
 ${lineFor(ev.utc, ev.tz)}
@@ -8197,6 +8217,7 @@ ${lineFor(ev.utc, ev.tz)}
 Tap the button to see it in your own time zone.`,
         { reply_markup: { inline_keyboard: [[{ text: "Show my time", callback_data: `tc:${id}` }]] } }
       );
+      await pinMeeting(ctx, sent.message_id);
       return;
     }
     const q = parseQuick(arg);

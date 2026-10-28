@@ -7558,6 +7558,17 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     await send(`Saved. Your time zone is ${tz.replace(/_/g, " ")}. Right now it is ${formatIn(Date.now(), tz)}.`);
   });
 
+  // Pin the meeting post with a notification so everyone is told. Replaces the previous meeting pin only (not other pins).
+  async function pinMeeting(ctx: any, messageId: number) {
+    try {
+      const key = `w:tcpin:${ctx.chat.id}`;
+      const prev = await stateGet<number | null>(key, null);
+      if (prev && prev !== messageId) { try { await ctx.api.unpinChatMessage(ctx.chat.id, prev); } catch {} }
+      await ctx.api.pinChatMessage(ctx.chat.id, messageId, { disable_notification: false });
+      await stateSet(key, messageId, 60 * 24 * 60 * 60);
+    } catch { try { await ctx.api.sendMessage(ctx.from.id, "I posted the meeting but could not pin it. Please give me the 'Pin messages' admin right in the group."); } catch {} }
+  }
+
   bot.command("timeconvert", async (ctx) => {
     if (!ctx.from || !ctx.chat) return;
     if (ctx.chat.type === "private") { await ctx.reply("Use /timeconvert inside a group. Send /mytimezone to me here to save your city."); return; }
@@ -7578,13 +7589,15 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
         try { await ctx.api.deleteMessage(ctx.chat.id, ctx.message!.message_id); } catch {}
         await ctx.api.editMessageText(ctx.chat.id, ctx.message!.reply_to_message!.message_id, `${ev.title} (updated)\n${lineFor(ev.utc, ev.tz)}\n\nTap the button to see it in your own time zone.`,
           { reply_markup: { inline_keyboard: [[{ text: "Show my time", callback_data: `tc:${oldId}` }]] } }).catch(() => {});
+        await pinMeeting(ctx, ctx.message!.reply_to_message!.message_id);
         return;
       }
       const id = Math.random().toString(36).slice(2, 10);
       await stateSet(`w:tc:${id}`, { utc: ev.utc, title: ev.title }, 60 * 24 * 60 * 60);
       try { await ctx.api.deleteMessage(ctx.chat.id, ctx.message!.message_id); } catch {}
-      await ctx.api.sendMessage(ctx.chat.id, `${ev.title}\n${lineFor(ev.utc, ev.tz)}\n\nTap the button to see it in your own time zone.`,
+      const sent = await ctx.api.sendMessage(ctx.chat.id, `${ev.title}\n${lineFor(ev.utc, ev.tz)}\n\nTap the button to see it in your own time zone.`,
         { reply_markup: { inline_keyboard: [[{ text: "Show my time", callback_data: `tc:${id}` }]] } });
+      await pinMeeting(ctx, sent.message_id);
       return;
     }
     const q = parseQuick(arg);
