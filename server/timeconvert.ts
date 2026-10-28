@@ -12,6 +12,7 @@ const ALIASES: Record<string, string> = {
   bst: "Europe/London", uk: "Europe/London", britain: "Europe/London", england: "Europe/London", "united kingdom": "Europe/London",
   cet: "Europe/Paris", cest: "Europe/Paris", ist: "Asia/Kolkata", india: "Asia/Kolkata", jst: "Asia/Tokyo", japan: "Asia/Tokyo",
   sgt: "Asia/Singapore", hkt: "Asia/Hong_Kong", china: "Asia/Shanghai", beijing: "Asia/Shanghai", korea: "Asia/Seoul",
+  qld: "Australia/Brisbane", nsw: "Australia/Sydney", vic: "Australia/Melbourne", tas: "Australia/Hobart", act: "Australia/Sydney", nt: "Australia/Darwin",
   tasmania: "Australia/Hobart", australia: "Australia/Sydney", "gold coast": "Australia/Brisbane", queensland: "Australia/Brisbane",
   "new south wales": "Australia/Sydney", victoria: "Australia/Melbourne", "south australia": "Australia/Adelaide",
   "western australia": "Australia/Perth", "northern territory": "Australia/Darwin", canberra: "Australia/Sydney",
@@ -77,7 +78,17 @@ export function resolveZone(input: string): string | null {
   const idx = buildIndex();
   const direct = idx.get(raw.toLowerCase().replace(/\s+/g, "_")) || idx.get(c);
   if (direct) return direct;
-  return buildCountryIndex().get(c) || null;
+  const country = buildCountryIndex().get(c);
+  if (country) return country;
+  // "Brisbane QLD", "Austin Texas": try again without the last word(s)
+  const words = c.split(" ");
+  for (let n = words.length - 1; n >= 1 && n >= words.length - 2; n--) {
+    const part = words.slice(0, n).join(" ");
+    if (ALIASES[part]) return ALIASES[part];
+    const hit = idx.get(part.replace(/ /g, "_")) || idx.get(part) || buildCountryIndex().get(part);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 export const zoneName = (tz: string) => tz.split("/").pop()!.replace(/_/g, " ");
@@ -122,14 +133,15 @@ const USAGE_QUICK = "Try: /timeconvert 7pm Hobart to London, New York\nOr with a
 
 // "7pm Hobart to London, New York"  /  "2026-11-05 19:00 Hobart to Los Angeles"  /  "tomorrow 8:30am London to Sydney"
 export function parseQuick(text: string): QuickResult | string {
-  const m = text.trim().match(/^(?:(\d{4}-\d{2}-\d{2}|today|tomorrow)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(.+?)\s+(?:to|in|into|->)\s+(.+)$/i);
+  const m = text.trim().match(/^(?:(\d{4}-\d{2}-\d{2}|today|tomorrow)\s+)?(\d{3,4}|\d{1,2}(?:[:.]\d{2})?)\s*(am|pm)?\s+(.+?)\s+(?:to|in|into|->)\s+(.+)$/i);
   if (!m) return USAGE_QUICK;
-  const clock = readClock(m[2], m[3], m[4]);
-  if (!clock) return "I couldn't read that time. Use 7pm, 7:30pm or 19:00.\n\n" + USAGE_QUICK;
-  const srcTz = resolveZone(m[5]);
-  if (!srcTz) return `I don't know the place "${m[5].trim()}". Try a city or country, like London, Peru or Los Angeles.`;
+  const tm = m[2].match(/^(\d{1,2})(?:[:.]?(\d{2}))?$/);
+  const clock = tm ? readClock(tm[1], tm[2], m[3]) : null;
+  if (!clock) return "I couldn't read that time. Use 7pm, 7:30pm, 930pm or 19:00.\n\n" + USAGE_QUICK;
+  const srcTz = resolveZone(m[4]);
+  if (!srcTz) return `I don't know the place "${m[4].trim()}". Try a city or country, like London, Peru or Los Angeles.`;
   const targets: { tz: string; label: string }[] = [];
-  for (const raw of m[6].split(/[,;&]|\band\b/i).map(s => s.trim()).filter(Boolean).slice(0, 8)) {
+  for (const raw of m[5].split(/[,;&]|\band\b/i).map(s => s.trim()).filter(Boolean).slice(0, 8)) {
     const tz = resolveZone(raw);
     if (!tz) return `I don't know the place "${raw}". Try a city or country, like London, Peru or Los Angeles.`;
     targets.push({ tz, label: raw.replace(/\b\w/g, c => c.toUpperCase()) });
@@ -141,7 +153,7 @@ export function parseQuick(text: string): QuickResult | string {
   else { const t = todayIn(srcTz, ds === "tomorrow" ? 1 : 0); y = t.y; mo = t.m; d = t.d; }
   const utc = zonedToUtc(y, mo, d, clock.h, clock.mi, srcTz);
   if (Number.isNaN(utc)) return "I couldn't read that date.";
-  return { utc, srcTz, srcLabel: m[5].trim().replace(/\b\w/g, c => c.toUpperCase()), targets };
+  return { utc, srcTz, srcLabel: m[4].trim().replace(/\b\w/g, c => c.toUpperCase()), targets };
 }
 
 export interface EventResult { utc: number; tz: string; title: string }
@@ -153,6 +165,9 @@ export function parseEvent(text: string, defaultTz: string): EventResult | strin
   if (!m) return null; // not the event form
   const clock = readClock(m[4], m[5], m[6]);
   if (!clock) return "I couldn't read that time. Use 24-hour time like 19:00.\n\n" + USAGE_EVENT;
+  // "2026-11-05 19:00 Hobart to Los Angeles" is the quick form (a place then "to"), not a meeting title.
+  const q = m[7].match(/^(.+?)\s+(?:to|into)\s+\S/i);
+  if (q && !m[7].includes("|") && resolveZone(q[1])) return null;
   let tz = defaultTz, title = m[7].trim();
   const bar = title.indexOf("|");
   if (bar >= 0) {

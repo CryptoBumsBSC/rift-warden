@@ -888,6 +888,12 @@ var ALIASES = {
   china: "Asia/Shanghai",
   beijing: "Asia/Shanghai",
   korea: "Asia/Seoul",
+  qld: "Australia/Brisbane",
+  nsw: "Australia/Sydney",
+  vic: "Australia/Melbourne",
+  tas: "Australia/Hobart",
+  act: "Australia/Sydney",
+  nt: "Australia/Darwin",
   tasmania: "Australia/Hobart",
   australia: "Australia/Sydney",
   "gold coast": "Australia/Brisbane",
@@ -999,7 +1005,16 @@ function resolveZone(input) {
   const idx = buildIndex();
   const direct = idx.get(raw.toLowerCase().replace(/\s+/g, "_")) || idx.get(c);
   if (direct) return direct;
-  return buildCountryIndex().get(c) || null;
+  const country = buildCountryIndex().get(c);
+  if (country) return country;
+  const words = c.split(" ");
+  for (let n = words.length - 1; n >= 1 && n >= words.length - 2; n--) {
+    const part = words.slice(0, n).join(" ");
+    if (ALIASES[part]) return ALIASES[part];
+    const hit = idx.get(part.replace(/ /g, "_")) || idx.get(part) || buildCountryIndex().get(part);
+    if (hit) return hit;
+  }
+  return null;
 }
 var zoneName = (tz) => tz.split("/").pop().replace(/_/g, " ");
 function offsetMs(utc, tz) {
@@ -1037,14 +1052,15 @@ function readClock(h, mi, ap) {
 }
 var USAGE_QUICK = "Try: /timeconvert 7pm Hobart to London, New York\nOr with a date: /timeconvert 2026-11-05 19:00 Hobart to Los Angeles";
 function parseQuick(text2) {
-  const m = text2.trim().match(/^(?:(\d{4}-\d{2}-\d{2}|today|tomorrow)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(.+?)\s+(?:to|in|into|->)\s+(.+)$/i);
+  const m = text2.trim().match(/^(?:(\d{4}-\d{2}-\d{2}|today|tomorrow)\s+)?(\d{3,4}|\d{1,2}(?:[:.]\d{2})?)\s*(am|pm)?\s+(.+?)\s+(?:to|in|into|->)\s+(.+)$/i);
   if (!m) return USAGE_QUICK;
-  const clock = readClock(m[2], m[3], m[4]);
-  if (!clock) return "I couldn't read that time. Use 7pm, 7:30pm or 19:00.\n\n" + USAGE_QUICK;
-  const srcTz = resolveZone(m[5]);
-  if (!srcTz) return `I don't know the place "${m[5].trim()}". Try a city or country, like London, Peru or Los Angeles.`;
+  const tm = m[2].match(/^(\d{1,2})(?:[:.]?(\d{2}))?$/);
+  const clock = tm ? readClock(tm[1], tm[2], m[3]) : null;
+  if (!clock) return "I couldn't read that time. Use 7pm, 7:30pm, 930pm or 19:00.\n\n" + USAGE_QUICK;
+  const srcTz = resolveZone(m[4]);
+  if (!srcTz) return `I don't know the place "${m[4].trim()}". Try a city or country, like London, Peru or Los Angeles.`;
   const targets = [];
-  for (const raw of m[6].split(/[,;&]|\band\b/i).map((s) => s.trim()).filter(Boolean).slice(0, 8)) {
+  for (const raw of m[5].split(/[,;&]|\band\b/i).map((s) => s.trim()).filter(Boolean).slice(0, 8)) {
     const tz = resolveZone(raw);
     if (!tz) return `I don't know the place "${raw}". Try a city or country, like London, Peru or Los Angeles.`;
     targets.push({ tz, label: raw.replace(/\b\w/g, (c) => c.toUpperCase()) });
@@ -1062,7 +1078,7 @@ function parseQuick(text2) {
   }
   const utc = zonedToUtc(y, mo, d, clock.h, clock.mi, srcTz);
   if (Number.isNaN(utc)) return "I couldn't read that date.";
-  return { utc, srcTz, srcLabel: m[5].trim().replace(/\b\w/g, (c) => c.toUpperCase()), targets };
+  return { utc, srcTz, srcLabel: m[4].trim().replace(/\b\w/g, (c) => c.toUpperCase()), targets };
 }
 var USAGE_EVENT = "To post a meeting time that members can check in their own time zone, send:\n/timeconvert 2026-11-05 19:00 Video chat\n\nTo use another time zone, put it before the title with a bar:\n/timeconvert 2026-11-05 19:00 London | Video chat";
 function parseEvent(text2, defaultTz) {
@@ -1070,6 +1086,8 @@ function parseEvent(text2, defaultTz) {
   if (!m) return null;
   const clock = readClock(m[4], m[5], m[6]);
   if (!clock) return "I couldn't read that time. Use 24-hour time like 19:00.\n\n" + USAGE_EVENT;
+  const q = m[7].match(/^(.+?)\s+(?:to|into)\s+\S/i);
+  if (q && !m[7].includes("|") && resolveZone(q[1])) return null;
   let tz = defaultTz, title = m[7].trim();
   const bar = title.indexOf("|");
   if (bar >= 0) {
