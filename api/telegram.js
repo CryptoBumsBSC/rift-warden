@@ -4496,6 +4496,7 @@ async function isBotAdmin(ctx, chatIdStr) {
   if (await isAdmin(ctx)) return true;
   const community = await getCommunity(chatIdStr);
   const userId = ctx.from?.id?.toString();
+  if (userId && (await sharedAdmins())?.includes(userId)) return true;
   return !!(userId && community?.botAdminIds?.includes(userId));
 }
 async function isAdmin(ctx) {
@@ -5118,8 +5119,20 @@ var PROTECTED_DEFAULT = [{ username: "RealAshleyWard", label: "@RealAshleyWard" 
 function ownerProtected() {
   return { id: GLOBAL_OWNER_USER_ID || void 0, username: "aussieboomer", names: ["aussieboomer", "aussie boomer"], label: "@aussieboomer", male: true };
 }
+var SHARED_PROT_KEY = "w:protected:shared";
+var SHARED_ADMINS_KEY = "w:sharedbotadmins";
+async function sharedAdmins() {
+  return await stateGet(SHARED_ADMINS_KEY, null);
+}
+async function sharedAdminSet(userId, add) {
+  const cur = await sharedAdmins();
+  if (!cur) return;
+  const next = add ? Array.from(/* @__PURE__ */ new Set([...cur, userId])) : cur.filter((x) => x !== userId);
+  await stateSet(SHARED_ADMINS_KEY, next, 5 * 365 * 24 * 60 * 60);
+}
 async function getProtected(chatId) {
-  const list = await stateGet(PROTECTED_KEY(chatId), PROTECTED_DEFAULT);
+  const shared = await stateGet(SHARED_PROT_KEY, null);
+  const list = shared ?? await stateGet(PROTECTED_KEY(chatId), PROTECTED_DEFAULT);
   const o = ownerProtected();
   const has = list.some((p) => o.id && p.id === o.id || p.username && p.username.toLowerCase() === "aussieboomer");
   if (has) {
@@ -5132,6 +5145,10 @@ async function getProtected(chatId) {
   return [...list, o];
 }
 async function saveProtected(chatId, list) {
+  if (await stateGet(SHARED_PROT_KEY, null)) {
+    await stateSet(SHARED_PROT_KEY, list, 5 * 365 * 24 * 60 * 60);
+    return;
+  }
   await stateSet(PROTECTED_KEY(chatId), list, 5 * 365 * 24 * 60 * 60);
 }
 async function adminProtected(api, chatId, explicit) {
@@ -5703,7 +5720,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -7595,6 +7612,25 @@ While it runs: new members cannot post for their first hour, links and files fro
     });
     await privateOwnerReply(ctx, "Event cancelled.");
   });
+  bot.command("shareprotected", async (ctx) => {
+    if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
+    const arg = (ctx.match || "").toString().trim().toLowerCase();
+    if (arg === "off") {
+      await stateDel(SHARED_PROT_KEY);
+      await stateDel(SHARED_ADMINS_KEY);
+      await privateOwnerReply(ctx, "Sharing is OFF. Each group uses its own protected list again (the lists each group had before are unchanged).");
+      return;
+    }
+    if (await stateGet(SHARED_PROT_KEY, null)) {
+      await privateOwnerReply(ctx, "Sharing is already ON. Every Warden group uses one protected list and one bot admin list. Add or remove people in any group and it changes in all of them.\n\nSend /shareprotected off to stop.");
+      return;
+    }
+    const list = await getProtected(ctx.chat.id);
+    const community = await getCommunity(String(ctx.chat.id));
+    await stateSet(SHARED_PROT_KEY, list, 5 * 365 * 24 * 60 * 60);
+    await stateSet(SHARED_ADMINS_KEY, community?.botAdminIds || [], 5 * 365 * 24 * 60 * 60);
+    await privateOwnerReply(ctx, `Sharing is ON. This group's list is now used in every Warden group: ${list.length} protected ${list.length === 1 ? "person" : "people"} and ${(community?.botAdminIds || []).length} bot admin${(community?.botAdminIds || []).length === 1 ? "" : "s"}. Add or remove in any group and it changes in all of them. Telegram group admins in each group are still protected automatically.`);
+  });
   bot.command("projectprotect", async (ctx) => {
     if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
     const arg = (ctx.match || "").toString().trim().toLowerCase();
@@ -8613,6 +8649,7 @@ Common options:
     const newList = [...currentList, targetUserId];
     await updateCommunity(chatIdStr, { botAdminIds: newList });
     communityCache.delete(chatIdStr);
+    await sharedAdminSet(targetUserId, true);
     await ctx.reply(`${targetName || "@" + targetUsername} added to the bot admin list. They can now run admin The Warden commands.`);
   });
   bot.command("removeadmin", async (ctx) => {
@@ -8676,6 +8713,7 @@ Common options:
     }
     await updateCommunity(chatIdStr, { botAdminIds: currentList.filter((id) => id !== targetUserId) });
     communityCache.delete(chatIdStr);
+    await sharedAdminSet(targetUserId, false);
     await ctx.reply(`${targetName} removed from the bot admin list.`);
   });
   bot.command("listadmins", async (ctx) => {
