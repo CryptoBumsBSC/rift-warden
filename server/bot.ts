@@ -5472,7 +5472,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/imagine", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/imagine", "/image", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -7772,7 +7772,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
   }
 
   // /imagine: owner, @aussieboomer and TreeFitty 50 a day each, admins 5 a day each. Free (Cloudflare). Counts reset at 00:00 UTC.
-  bot.command("imagine", async (ctx) => {
+  bot.command(["imagine", "image"], async (ctx) => {
     if (!ctx.from || !ctx.chat || !ctx.message) return;
     const m = ctx.message;
     const reply = (t: string) => ctx.reply(t, { reply_parameters: { message_id: m.message_id } });
