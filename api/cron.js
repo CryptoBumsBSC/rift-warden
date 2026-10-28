@@ -946,6 +946,32 @@ var ALIASES = {
   fiji: "Pacific/Fiji",
   "cape town": "Africa/Johannesburg"
 };
+var COUNTRY_ZONES = "AF:Asia/Kabul AL:Europe/Tirane DZ:Africa/Algiers AD:Europe/Andorra AO:Africa/Luanda AG:America/Antigua AR:America/Argentina/Buenos_Aires AM:Asia/Yerevan AU:Australia/Sydney AT:Europe/Vienna AZ:Asia/Baku BS:America/Nassau BH:Asia/Bahrain BD:Asia/Dhaka BB:America/Barbados BY:Europe/Minsk BE:Europe/Brussels BZ:America/Belize BJ:Africa/Porto-Novo BT:Asia/Thimphu BO:America/La_Paz BA:Europe/Sarajevo BW:Africa/Gaborone BR:America/Sao_Paulo BN:Asia/Brunei BG:Europe/Sofia BF:Africa/Ouagadougou BI:Africa/Bujumbura CV:Atlantic/Cape_Verde KH:Asia/Phnom_Penh CM:Africa/Douala CA:America/Toronto CF:Africa/Bangui TD:Africa/Ndjamena CL:America/Santiago CN:Asia/Shanghai CO:America/Bogota KM:Indian/Comoro CG:Africa/Brazzaville CD:Africa/Kinshasa CR:America/Costa_Rica CI:Africa/Abidjan HR:Europe/Zagreb CU:America/Havana CY:Asia/Nicosia CZ:Europe/Prague DK:Europe/Copenhagen DJ:Africa/Djibouti DM:America/Dominica DO:America/Santo_Domingo EC:America/Guayaquil EG:Africa/Cairo SV:America/El_Salvador GQ:Africa/Malabo ER:Africa/Asmara EE:Europe/Tallinn SZ:Africa/Mbabane ET:Africa/Addis_Ababa FJ:Pacific/Fiji FI:Europe/Helsinki FR:Europe/Paris GA:Africa/Libreville GM:Africa/Banjul GE:Asia/Tbilisi DE:Europe/Berlin GH:Africa/Accra GR:Europe/Athens GD:America/Grenada GT:America/Guatemala GN:Africa/Conakry GW:Africa/Bissau GY:America/Guyana HT:America/Port-au-Prince HN:America/Tegucigalpa HU:Europe/Budapest IS:Atlantic/Reykjavik IN:Asia/Kolkata ID:Asia/Jakarta IR:Asia/Tehran IQ:Asia/Baghdad IE:Europe/Dublin IL:Asia/Jerusalem IT:Europe/Rome JM:America/Jamaica JP:Asia/Tokyo JO:Asia/Amman KZ:Asia/Almaty KE:Africa/Nairobi KI:Pacific/Tarawa KP:Asia/Pyongyang KR:Asia/Seoul XK:Europe/Belgrade KW:Asia/Kuwait KG:Asia/Bishkek LA:Asia/Vientiane LV:Europe/Riga LB:Asia/Beirut LS:Africa/Maseru LR:Africa/Monrovia LY:Africa/Tripoli LI:Europe/Vaduz LT:Europe/Vilnius LU:Europe/Luxembourg MG:Indian/Antananarivo MW:Africa/Blantyre MY:Asia/Kuala_Lumpur MV:Indian/Maldives ML:Africa/Bamako MT:Europe/Malta MH:Pacific/Majuro MR:Africa/Nouakchott MU:Indian/Mauritius MX:America/Mexico_City FM:Pacific/Pohnpei MD:Europe/Chisinau MC:Europe/Monaco MN:Asia/Ulaanbaatar ME:Europe/Podgorica MA:Africa/Casablanca MZ:Africa/Maputo MM:Asia/Yangon NA:Africa/Windhoek NR:Pacific/Nauru NP:Asia/Kathmandu NL:Europe/Amsterdam NZ:Pacific/Auckland NI:America/Managua NE:Africa/Niamey NG:Africa/Lagos MK:Europe/Skopje NO:Europe/Oslo OM:Asia/Muscat PK:Asia/Karachi PW:Pacific/Palau PS:Asia/Gaza PA:America/Panama PG:Pacific/Port_Moresby PY:America/Asuncion PE:America/Lima PH:Asia/Manila PL:Europe/Warsaw PT:Europe/Lisbon QA:Asia/Qatar RO:Europe/Bucharest RU:Europe/Moscow RW:Africa/Kigali KN:America/St_Kitts LC:America/St_Lucia VC:America/St_Vincent WS:Pacific/Apia SM:Europe/San_Marino ST:Africa/Sao_Tome SA:Asia/Riyadh SN:Africa/Dakar RS:Europe/Belgrade SC:Indian/Mahe SL:Africa/Freetown SG:Asia/Singapore SK:Europe/Bratislava SI:Europe/Ljubljana SB:Pacific/Guadalcanal SO:Africa/Mogadishu ZA:Africa/Johannesburg SS:Africa/Juba ES:Europe/Madrid LK:Asia/Colombo SD:Africa/Khartoum SR:America/Paramaribo SE:Europe/Stockholm CH:Europe/Zurich SY:Asia/Damascus TW:Asia/Taipei TJ:Asia/Dushanbe TZ:Africa/Dar_es_Salaam TH:Asia/Bangkok TL:Asia/Dili TG:Africa/Lome TO:Pacific/Tongatapu TT:America/Port_of_Spain TN:Africa/Tunis TR:Europe/Istanbul TM:Asia/Ashgabat TV:Pacific/Funafuti UG:Africa/Kampala UA:Europe/Kyiv AE:Asia/Dubai GB:Europe/London US:America/New_York UY:America/Montevideo UZ:Asia/Tashkent VU:Pacific/Efate VA:Europe/Vatican VE:America/Caracas VN:Asia/Ho_Chi_Minh YE:Asia/Aden ZM:Africa/Lusaka ZW:Africa/Harare HK:Asia/Hong_Kong MO:Asia/Macau PR:America/Puerto_Rico GL:America/Nuuk";
+var COUNTRY_EXTRA = { usa: "US", "united states": "US", america: "US", "united states of america": "US", uk: "GB", "great britain": "GB", "united kingdom": "GB", england: "GB", scotland: "GB", wales: "GB", "northern ireland": "GB", russia: "RU", "south korea": "KR", "north korea": "KP", "ivory coast": "CI", "czech republic": "CZ", czechia: "CZ", burma: "MM", swaziland: "SZ", "east timor": "TL", "cape verde": "CV", turkey: "TR", turkiye: "TR", holland: "NL", "uae": "AE", "emirates": "AE", macedonia: "MK", palestine: "PS", kosovo: "XK", taiwan: "TW", "hong kong": "HK", "vatican city": "VA" };
+var countryIndex = null;
+function buildCountryIndex() {
+  if (countryIndex) return countryIndex;
+  const m = /* @__PURE__ */ new Map();
+  let dn = null;
+  try {
+    dn = new Intl.DisplayNames(["en"], { type: "region" });
+  } catch {
+  }
+  const byCode = {};
+  for (const pair of COUNTRY_ZONES.split(/\s+/)) {
+    const [code, zone] = pair.split(":");
+    byCode[code] = zone;
+    let name = "";
+    try {
+      name = dn ? dn.of(code) : "";
+    } catch {
+    }
+    if (name && name !== code) m.set(name.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim(), zone);
+  }
+  for (const [k, code] of Object.entries(COUNTRY_EXTRA)) if (byCode[code]) m.set(k, byCode[code]);
+  countryIndex = m;
+  return m;
+}
 var index = null;
 function buildIndex() {
   if (index) return index;
@@ -973,7 +999,7 @@ function resolveZone(input) {
   const idx = buildIndex();
   const direct = idx.get(raw.toLowerCase().replace(/\s+/g, "_")) || idx.get(c);
   if (direct) return direct;
-  return null;
+  return buildCountryIndex().get(c) || null;
 }
 var zoneName = (tz) => tz.split("/").pop().replace(/_/g, " ");
 function offsetMs(utc, tz) {
@@ -1016,11 +1042,11 @@ function parseQuick(text2) {
   const clock = readClock(m[2], m[3], m[4]);
   if (!clock) return "I couldn't read that time. Use 7pm, 7:30pm or 19:00.\n\n" + USAGE_QUICK;
   const srcTz = resolveZone(m[5]);
-  if (!srcTz) return `I don't know the place "${m[5].trim()}". Try a city like London or Los Angeles, or a name like Australia/Hobart.`;
+  if (!srcTz) return `I don't know the place "${m[5].trim()}". Try a city or country, like London, Peru or Los Angeles.`;
   const targets = [];
   for (const raw of m[6].split(/[,;&]|\band\b/i).map((s) => s.trim()).filter(Boolean).slice(0, 8)) {
     const tz = resolveZone(raw);
-    if (!tz) return `I don't know the place "${raw}". Try a city like London or Los Angeles, or a name like Australia/Hobart.`;
+    if (!tz) return `I don't know the place "${raw}". Try a city or country, like London, Peru or Los Angeles.`;
     targets.push({ tz, label: raw.replace(/\b\w/g, (c) => c.toUpperCase()) });
   }
   if (!targets.length) return USAGE_QUICK;
@@ -8122,7 +8148,7 @@ While it runs: new members cannot post for their first hour, links and files fro
     if (await tcLimited(`${ctx.chat.id}:${ctx.from.id}`)) return;
     const arg = (ctx.match || "").toString().trim();
     if (!arg) {
-      await ctx.reply("Time converter\n\nQuick answer for anyone:\n/timeconvert 7pm Hobart to London, New York\n\nThe group owner and admins post a meeting time with a button:\n/timeconvert 2026-11-05 19:00 Video chat\n(To change it, reply to the meeting post with the new time)\n\nMembers save their city once with /mytimezone Los Angeles");
+      await ctx.reply("Time converter - how to use it\n\n1) Quick answer (anyone):\n/timeconvert 7pm Hobart to London, New York\n/timeconvert 2026-11-05 19:00 Hobart to Peru, Japan\n/timeconvert tomorrow 8:30am London to Sydney\n\n2) The group owner and admins post a meeting time with a button:\n/timeconvert 2026-11-05 19:00 Video chat\n/timeconvert 2026-11-05 19:00 London | Video chat (another time zone)\nTo change it, reply to the meeting post with the new time.\n\n3) Members save their place once: send /mytimezone Los Angeles to me in private chat.\n\nPlaces: any city, any country, or a short name like PST or AEST. Up to 8 places in one go. Countries with several time zones use the capital, so use a city for exact times.\n\nFull guide: the Warden guide");
       return;
     }
     const community = await getCommunity(String(ctx.chat.id));

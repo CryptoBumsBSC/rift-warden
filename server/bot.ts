@@ -7563,7 +7563,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     if (ctx.chat.type === "private") { await ctx.reply("Use /timeconvert inside a group. Send /mytimezone to me here to save your city."); return; }
     if (await tcLimited(`${ctx.chat.id}:${ctx.from.id}`)) return;
     const arg = (ctx.match || "").toString().trim();
-    if (!arg) { await ctx.reply("Time converter\n\nQuick answer for anyone:\n/timeconvert 7pm Hobart to London, New York\n\nThe group owner and admins post a meeting time with a button:\n/timeconvert 2026-11-05 19:00 Video chat\n(To change it, reply to the meeting post with the new time)\n\nMembers save their city once with /mytimezone Los Angeles"); return; }
+    if (!arg) { await ctx.reply("Time converter - how to use it\n\n1) Quick answer (anyone):\n/timeconvert 7pm Hobart to London, New York\n/timeconvert 2026-11-05 19:00 Hobart to Peru, Japan\n/timeconvert tomorrow 8:30am London to Sydney\n\n2) The group owner and admins post a meeting time with a button:\n/timeconvert 2026-11-05 19:00 Video chat\n/timeconvert 2026-11-05 19:00 London | Video chat (another time zone)\nTo change it, reply to the meeting post with the new time.\n\n3) Members save their place once: send /mytimezone Los Angeles to me in private chat.\n\nPlaces: any city, any country, or a short name like PST or AEST. Up to 8 places in one go. Countries with several time zones use the capital, so use a city for exact times.\n\nFull guide: the Warden guide"); return; }
     const community = await getCommunity(String(ctx.chat.id));
     const groupTz = resolveZone(community?.timezone || "") || "Australia/Hobart";
     const ev = parseMeeting(arg, groupTz);
