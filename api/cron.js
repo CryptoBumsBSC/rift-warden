@@ -6486,7 +6486,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/imagine", "/image", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/imagine", "/image", "/allowimage", "/denyimage", "/imageallowed", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -8422,15 +8422,22 @@ While it runs: new members cannot post for their first hour, links and files fro
     const reply = (t) => ctx.reply(t, { reply_parameters: { message_id: m.message_id } });
     const boss = isAnnouncer(ctx.from);
     const admin = boss || ctx.chat.type !== "private" && await isUserAdmin(ctx, ctx.from.id);
-    if (!admin) {
+    const grantKey = `w:imgallow:${ctx.from.id}`;
+    const grant = admin ? null : await stateGet(grantKey, null);
+    const grantOk = !!grant && grant.until > Date.now() && grant.used < grant.max;
+    if (!admin && !grantOk) {
+      if (grant && (grant.until <= Date.now() || grant.used >= grant.max)) {
+        await reply("Your picture approval has run out. Ask the owner or TreeFitty to approve you again.");
+        return;
+      }
       await reply("/imagine is for the owner, TreeFitty and group admins.");
       return;
     }
-    const limit = boss ? Infinity : 5;
+    const limit = boss ? Infinity : grantOk ? grant.max : 5;
     const ownerFree = String(ctx.from.id) === GLOBAL_OWNER_USER_ID || (ctx.from.username || "").toLowerCase() === "aussieboomer";
     const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     const usedKey = `w:img:${ctx.from.id}:${day}`;
-    const used = await stateGet(usedKey, 0);
+    const used = grantOk ? grant.used : await stateGet(usedKey, 0);
     const prompt = (ctx.match || "").toString().trim();
     if (!prompt) {
       await reply(`Imagine - how to use it
@@ -8439,7 +8446,7 @@ While it runs: new members cannot post for their first hour, links and files fro
 /imagine pixel art koala wearing a crown
 
 Write what you want to see. Short and clear works best.
-${boss ? "No personal limit for you." : `You have ${Math.max(0, limit - used)} of ${limit} pictures left today. It resets at 00:00 UTC.`}`);
+${boss ? "No personal limit for you." : `${grantOk ? `You are approved for ${limit} pictures in total (${Math.max(0, limit - used)} left) until ${new Date(grant.until).toISOString().slice(0, 10)}.` : `You have ${Math.max(0, limit - used)} of ${limit} pictures left today. It resets at 00:00 UTC.`}`}`);
       return;
     }
     if (!cfImageReady()) {
@@ -8447,7 +8454,7 @@ ${boss ? "No personal limit for you." : `You have ${Math.max(0, limit - used)} o
       return;
     }
     if (!boss && used >= limit) {
-      await reply(`That's your ${limit} pictures for today. It resets at 00:00 UTC.`);
+      await reply(grantOk ? `That's all ${limit} pictures you were approved for.` : `That's your ${limit} pictures for today. It resets at 00:00 UTC.`);
       return;
     }
     const totalKey = `w:img:total:${day}`;
@@ -8498,15 +8505,61 @@ Set ok=true for everything else: any art style (pixel art, cartoon, painting, an
     }
     try {
       const img = await generateCfImage(ownerFree ? prompt : `${prompt}. Family-friendly, G-rated.`);
-      await stateSet(usedKey, used + 1, 36 * 60 * 60);
+      if (grantOk) await stateSet(grantKey, { ...grant, used: grant.used + 1 }, 40 * 24 * 60 * 60);
+      else await stateSet(usedKey, used + 1, 36 * 60 * 60);
       await stateIncr(totalKey, 36 * 60 * 60);
       const who = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || "you";
-      await ctx.api.sendPhoto(ctx.chat.id, new InputFile(img, "imagine.jpg"), { caption: `For ${who}: ${prompt}`.slice(0, 900) + (boss ? "" : `
+      await ctx.api.sendPhoto(ctx.chat.id, new InputFile(img, "imagine.jpg"), { caption: `For ${who}: ${prompt}`.slice(0, 900) + (boss ? "" : grantOk ? `
+(${limit - used - 1} left of your approval)` : `
 (${limit - used - 1} left today)`), reply_parameters: { message_id: m.message_id } });
     } catch (e) {
       console.error("[imagine] failed:", e);
       await reply("The picture didn't come out. It did not count against your limit. Try again.");
     }
+  });
+  bot.command("allowimage", async (ctx) => {
+    if (!ctx.from || !ctx.chat || !ctx.message) return;
+    if (!isAnnouncer(ctx.from)) return;
+    const m = ctx.message;
+    const reply = (t) => ctx.reply(t, { reply_parameters: { message_id: m.message_id } });
+    const target = m.reply_to_message?.from;
+    const nums = (ctx.match || "").toString().match(/\d+/g) || [];
+    const days = Number(nums[0]), max = Number(nums[1]);
+    if (!target || target.is_bot || !days || !max) {
+      await reply("Allow a member to make pictures\n\nReply to their message with:\n/allowimage 7 10\n\nThat means 7 days and 10 pictures in total. Days can be 1 to 30, pictures 1 to 100. When the days or the pictures run out, they stop and you approve again.");
+      return;
+    }
+    if (days < 1 || days > 30 || max < 1 || max > 100) {
+      await reply("Days must be 1 to 30 and pictures 1 to 100. Example: /allowimage 7 10");
+      return;
+    }
+    const until = Date.now() + days * 24 * 60 * 60 * 1e3;
+    await stateSet(`w:imgallow:${target.id}`, { until, max, used: 0 }, 40 * 24 * 60 * 60);
+    const idx = await stateGet("w:imgallow:index", {}) || {};
+    idx[String(target.id)] = target.username ? `@${target.username}` : target.first_name || String(target.id);
+    await stateSet("w:imgallow:index", idx, 5 * 365 * 24 * 60 * 60);
+    await reply(`${idx[String(target.id)]} can make ${max} pictures in the next ${days} days. When that runs out they need your approval again.`);
+  });
+  bot.command("denyimage", async (ctx) => {
+    if (!ctx.from || !ctx.message || !isAnnouncer(ctx.from)) return;
+    const target = ctx.message.reply_to_message?.from;
+    if (!target) {
+      await ctx.reply("Reply to the member's message with /denyimage to stop their picture approval.", { reply_parameters: { message_id: ctx.message.message_id } });
+      return;
+    }
+    await stateDel(`w:imgallow:${target.id}`);
+    await ctx.reply("Picture approval removed.", { reply_parameters: { message_id: ctx.message.message_id } });
+  });
+  bot.command("imageallowed", async (ctx) => {
+    if (!ctx.from || !ctx.message || !isAnnouncer(ctx.from)) return;
+    const idx = await stateGet("w:imgallow:index", {}) || {};
+    const lines = [];
+    for (const [id, name] of Object.entries(idx)) {
+      const g = await stateGet(`w:imgallow:${id}`, null);
+      if (g && g.until > Date.now() && g.used < g.max) lines.push(`${name}: ${g.max - g.used} of ${g.max} left, until ${new Date(g.until).toISOString().slice(0, 10)}`);
+    }
+    await ctx.reply(lines.length ? `Approved for pictures:
+${lines.join("\n")}` : "Nobody is approved for pictures right now.", { reply_parameters: { message_id: ctx.message.message_id } });
   });
   bot.command("roast", async (ctx) => {
     if (!ctx.from || !ctx.chat) return;
