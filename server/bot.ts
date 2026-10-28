@@ -7550,8 +7550,8 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     if (!ctx.from || !ctx.chat) return;
     const arg = (ctx.match || "").toString().trim();
     const tz = resolveZone(arg);
-    const text = !arg ? "Tell me your city so I can show meeting times in your time zone.\nExample: /mytimezone Los Angeles"
-      : !tz ? `I don't know the place "${arg}". Try a city like London or Los Angeles, or a name like Australia/Hobart.` : null;
+    const text = !arg ? "My time zone - how to use it\n\nSave your place once and the Show my time button on meeting posts shows the time for you.\n\nExamples:\n/mytimezone Los Angeles\n/mytimezone London\n/mytimezone Peru\n/mytimezone PST\n\nA city, a country or a short name all work. You can send it here in private or in the group (my answer comes to you privately). Send it again any time to change it."
+      : !tz ? `I don't know the place "${arg}". Try a city or country, like London, Peru or Los Angeles.` : null;
     const send = async (t: string) => { if (ctx.chat!.type === "private") await ctx.reply(t); else await privateOwnerReply(ctx, t); };
     if (text || !tz) { await send(text!); return; }
     await stateSet(`w:tz:${ctx.from.id}`, tz, 5 * 365 * 24 * 60 * 60);
