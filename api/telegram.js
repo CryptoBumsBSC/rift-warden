@@ -8152,7 +8152,7 @@ While it runs: new members cannot post for their first hour, links and files fro
       await reply("/imagine is for the owner, TreeFitty and group admins.");
       return;
     }
-    const limit = boss ? 20 : 3;
+    const limit = boss ? 50 : 5;
     const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     const usedKey = `w:img:${ctx.from.id}:${day}`;
     const used = await stateGet(usedKey, 0);

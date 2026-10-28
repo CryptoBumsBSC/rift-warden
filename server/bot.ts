@@ -7771,7 +7771,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     } catch { try { await ctx.api.sendMessage(ctx.from.id, "I posted the meeting but could not pin it. Please give me the 'Pin messages' admin right in the group."); } catch {} }
   }
 
-  // /imagine: owner and TreeFitty 20 a day each, admins 3 a day each. Free (Cloudflare). Counts reset at 00:00 UTC.
+  // /imagine: owner, @aussieboomer and TreeFitty 50 a day each, admins 5 a day each. Free (Cloudflare). Counts reset at 00:00 UTC.
   bot.command("imagine", async (ctx) => {
     if (!ctx.from || !ctx.chat || !ctx.message) return;
     const m = ctx.message;
@@ -7779,7 +7779,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     const boss = isAnnouncer(ctx.from);
     const admin = boss || (ctx.chat.type !== "private" && await isUserAdmin(ctx, ctx.from.id));
     if (!admin) { await reply("/imagine is for the owner, TreeFitty and group admins."); return; }
-    const limit = boss ? 20 : 3;
+    const limit = boss ? 50 : 5;
     const day = new Date().toISOString().slice(0, 10);
     const usedKey = `w:img:${ctx.from.id}:${day}`;
     const used = await stateGet<number>(usedKey, 0);
