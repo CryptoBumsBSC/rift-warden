@@ -5086,6 +5086,55 @@ async function holdOwnWords(ctx: MyContext, text: string, messageId: number): Pr
   return true;
 }
 
+// === CLEAN CHAT (per group, off until the owner or an admin turns it on) ===
+// Nasty comments are deleted at once with no penalty. Angry or annoyed but fair comments stay up.
+const CLEAN_KEY = (chatId: number | string) => `w:clean:${chatId}`;
+const CLEAN_DAILY_CAP = 1500;
+const CLEAN_PROMPT = `You keep a Telegram community friendly. Decide if ONE message is nasty. Reply JSON only: {"nasty": true or false, "reason": "short reason"}.
+nasty = true ONLY for: personal insults or name-calling aimed at a person or group, bullying or mocking someone, hate or slurs, threats, telling someone to die or hurt themselves, sexual harassment, or abuse aimed at the admins, the team or other members.
+nasty = false for everything else, including: anger or frustration about a situation, complaints about the project or a price, disagreement, honest criticism, sarcasm that is not abusive, swearing that is not aimed at a person, jokes between friends, questions, and annoyed but fair comments.
+When unsure, answer false.`;
+async function holdCleanChat(ctx: MyContext, text: string, messageId: number): Promise<boolean> {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot || chat.id >= 0 || text.trim().length < 6) return false;
+  try {
+    if (!(await stateGet<boolean>(CLEAN_KEY(chat.id), false))) return false;
+    const people = await getProtected(chat.id);
+    if (people.some(p => (p.id && p.id === String(from.id)) || (p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase()))) return false;
+    if (isAnnouncer(from) || await isUserAdmin(ctx, from.id)) return false;
+    const day = new Date().toISOString().slice(0, 10);
+    if ((await stateIncr(`w:cleanai:${chat.id}:${day}`, 36 * 60 * 60)) > CLEAN_DAILY_CAP) return false;
+    const ai = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [{ role: "system", content: CLEAN_PROMPT }, { role: "user", content: text.slice(0, 1000) }],
+      max_tokens: 60,
+      temperature: 0,
+    });
+    const v = JSON.parse(ai.choices[0]?.message?.content || "{}") as any;
+    if (v.nasty !== true) return false;
+    try { await ctx.api.deleteMessage(chat.id, messageId); } catch {}
+    await stateIncr(`w:cleann:${chat.id}:${day}`, 4 * 24 * 60 * 60);
+    const seen = await stateGet<string[]>(`w:cleanlog:${chat.id}:${day}`, []);
+    seen.push(`${from.username ? "@" + from.username : (from.first_name || "A member")}: "${text.slice(0, 120)}"`);
+    await stateSet(`w:cleanlog:${chat.id}:${day}`, seen.slice(-5), 4 * 24 * 60 * 60);
+    await logViolation(String(chat.id), String(from.id), from.username || "", "clean_chat", text.slice(0, 120), `Nasty comment: ${String(v.reason || "").slice(0, 100)}`, "delete").catch(() => {});
+    await incrementModStat(String(chat.id), "messagesBlocked");
+    return true;
+  } catch (e) { console.error("[cleanchat] check failed (message left up):", e); return false; }
+}
+async function sendCleanChatSummary(bot: Bot<MyContext>): Promise<void> {
+  const yday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const lines: string[] = [];
+  for (const chatId of Array.from(activeChats)) {
+    const n = await stateGet<number>(`w:cleann:${chatId}:${yday}`, 0);
+    if (!n) continue;
+    const seen = await stateGet<string[]>(`w:cleanlog:${chatId}:${yday}`, []);
+    lines.push(`Group ${chatId}: ${n} removed\n` + seen.map(x => `- ${x}`).join("\n"));
+  }
+  if (lines.length) await alertProtectedOwners(bot.api, `Clean chat summary (yesterday)\n\n${lines.join("\n\n")}`);
+}
+
 // === @all ANNOUNCEMENTS ===
 // When the owner, TreeFitty or @aussieboomer posts a message containing @all, it is pinned with a notification so every member is told.
 const ATALL_RE = /(^|\s)@all\b/i;
@@ -5270,7 +5319,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -7568,6 +7617,22 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       await stateSet(key, messageId, 60 * 24 * 60 * 60);
     } catch { try { await ctx.api.sendMessage(ctx.from.id, "I posted the meeting but could not pin it. Please give me the 'Pin messages' admin right in the group."); } catch {} }
   }
+
+  bot.command("cleanchat", async (ctx) => {
+    if (!ctx.from || !ctx.chat) return;
+    if (ctx.chat.type === "private") { await ctx.reply("Use /cleanchat inside your group."); return; }
+    if (!(await canRunAdminCmd(ctx))) return;
+    const arg = (ctx.match || "").toString().trim().toLowerCase();
+    if (arg === "on" || arg === "off") {
+      await stateSet(CLEAN_KEY(ctx.chat.id), arg === "on", 5 * 365 * 24 * 60 * 60);
+      await privateOwnerReply(ctx, arg === "on"
+        ? "Clean chat is ON for this group.\nNasty comments (insults, bullying, hate, threats) are deleted straight away with no penalty. Angry or annoyed but fair comments stay up. Admins and protected people are never touched. The owners get a daily summary of what was removed."
+        : "Clean chat is OFF for this group.");
+      return;
+    }
+    const on = await stateGet<boolean>(CLEAN_KEY(ctx.chat.id), false);
+    await privateOwnerReply(ctx, `Clean chat is ${on ? "ON" : "OFF"} for this group.\n\nWhen on, nasty comments (insults, name-calling, bullying, hate, threats) are deleted straight away with no penalty. Angry, annoyed or critical but fair comments stay up. Admins and protected people are never touched. All the other rules still apply.\n\n/cleanchat on  or  /cleanchat off`);
+  });
 
   bot.command("timeconvert", async (ctx) => {
     if (!ctx.from || !ctx.chat) return;
@@ -10481,6 +10546,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       if (await holdHiddenLink(ctx)) return;
       if (await holdCryptoAddress(ctx, text, ctx.message.message_id)) return;
       if (await holdAdminOnlyWord(ctx, text, ctx.message.message_id)) return;
+      if (await holdCleanChat(ctx, text, ctx.message.message_id)) return;
       if (communityTrust !== "trusted" && await holdMarketingPitch(ctx, text, ctx.message.message_id)) return;
       if (communityTrust !== "trusted" && await holdLinkFromUntrusted(ctx)) return;
     }
@@ -12624,6 +12690,7 @@ export async function runCronTick(): Promise<{ ran: string[] }> {
   // Daily
   const before = ran.length;
   await onceDaily("safety-digest", 8, async () => { await sendSafetyDigest(bot); ran.push("safety-digest"); });
+  await onceDaily("clean-summary", 8, async () => { await sendCleanChatSummary(bot); ran.push("clean-summary"); });
   await onceDaily("quote", 10, async () => { await postDailyQuote(); ran.push("daily-quote"); });
   await onceDaily("birthdays", 9, async () => { await checkBirthdays(); ran.push("birthdays"); });
   await onceDaily("winners-daily", 20, async () => { await announceWinners("daily"); ran.push("winners-daily"); });

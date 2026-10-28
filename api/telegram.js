@@ -5833,6 +5833,48 @@ Message: ${text2.slice(0, 300)}`);
   await incrementModStat(String(chat.id), "messagesBlocked");
   return true;
 }
+var CLEAN_KEY = (chatId) => `w:clean:${chatId}`;
+var CLEAN_DAILY_CAP = 1500;
+var CLEAN_PROMPT = `You keep a Telegram community friendly. Decide if ONE message is nasty. Reply JSON only: {"nasty": true or false, "reason": "short reason"}.
+nasty = true ONLY for: personal insults or name-calling aimed at a person or group, bullying or mocking someone, hate or slurs, threats, telling someone to die or hurt themselves, sexual harassment, or abuse aimed at the admins, the team or other members.
+nasty = false for everything else, including: anger or frustration about a situation, complaints about the project or a price, disagreement, honest criticism, sarcasm that is not abusive, swearing that is not aimed at a person, jokes between friends, questions, and annoyed but fair comments.
+When unsure, answer false.`;
+async function holdCleanChat(ctx, text2, messageId) {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || from.is_bot || chat.id >= 0 || text2.trim().length < 6) return false;
+  try {
+    if (!await stateGet(CLEAN_KEY(chat.id), false)) return false;
+    const people = await getProtected(chat.id);
+    if (people.some((p) => p.id && p.id === String(from.id) || p.username && from.username && p.username.toLowerCase() === from.username.toLowerCase())) return false;
+    if (isAnnouncer(from) || await isUserAdmin(ctx, from.id)) return false;
+    const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    if (await stateIncr(`w:cleanai:${chat.id}:${day}`, 36 * 60 * 60) > CLEAN_DAILY_CAP) return false;
+    const ai = await openai3.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [{ role: "system", content: CLEAN_PROMPT }, { role: "user", content: text2.slice(0, 1e3) }],
+      max_tokens: 60,
+      temperature: 0
+    });
+    const v = JSON.parse(ai.choices[0]?.message?.content || "{}");
+    if (v.nasty !== true) return false;
+    try {
+      await ctx.api.deleteMessage(chat.id, messageId);
+    } catch {
+    }
+    await stateIncr(`w:cleann:${chat.id}:${day}`, 4 * 24 * 60 * 60);
+    const seen = await stateGet(`w:cleanlog:${chat.id}:${day}`, []);
+    seen.push(`${from.username ? "@" + from.username : from.first_name || "A member"}: "${text2.slice(0, 120)}"`);
+    await stateSet(`w:cleanlog:${chat.id}:${day}`, seen.slice(-5), 4 * 24 * 60 * 60);
+    await logViolation(String(chat.id), String(from.id), from.username || "", "clean_chat", text2.slice(0, 120), `Nasty comment: ${String(v.reason || "").slice(0, 100)}`, "delete").catch(() => {
+    });
+    await incrementModStat(String(chat.id), "messagesBlocked");
+    return true;
+  } catch (e) {
+    console.error("[cleanchat] check failed (message left up):", e);
+    return false;
+  }
+}
 var ATALL_RE = /(^|\s)@all\b/i;
 var ATALL_KEY = (chatId) => `w:atall:${chatId}`;
 function isAnnouncer(from) {
@@ -5986,7 +6028,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -7916,6 +7958,26 @@ While it runs: new members cannot post for their first hour, links and files fro
       }
     }
   }
+  bot.command("cleanchat", async (ctx) => {
+    if (!ctx.from || !ctx.chat) return;
+    if (ctx.chat.type === "private") {
+      await ctx.reply("Use /cleanchat inside your group.");
+      return;
+    }
+    if (!await canRunAdminCmd(ctx)) return;
+    const arg = (ctx.match || "").toString().trim().toLowerCase();
+    if (arg === "on" || arg === "off") {
+      await stateSet(CLEAN_KEY(ctx.chat.id), arg === "on", 5 * 365 * 24 * 60 * 60);
+      await privateOwnerReply(ctx, arg === "on" ? "Clean chat is ON for this group.\nNasty comments (insults, bullying, hate, threats) are deleted straight away with no penalty. Angry or annoyed but fair comments stay up. Admins and protected people are never touched. The owners get a daily summary of what was removed." : "Clean chat is OFF for this group.");
+      return;
+    }
+    const on = await stateGet(CLEAN_KEY(ctx.chat.id), false);
+    await privateOwnerReply(ctx, `Clean chat is ${on ? "ON" : "OFF"} for this group.
+
+When on, nasty comments (insults, name-calling, bullying, hate, threats) are deleted straight away with no penalty. Angry, annoyed or critical but fair comments stay up. Admins and protected people are never touched. All the other rules still apply.
+
+/cleanchat on  or  /cleanchat off`);
+  });
   bot.command("timeconvert", async (ctx) => {
     if (!ctx.from || !ctx.chat) return;
     if (ctx.chat.type === "private") {
@@ -10658,6 +10720,7 @@ Admins, please review!`,
       if (await holdHiddenLink(ctx)) return;
       if (await holdCryptoAddress(ctx, text2, ctx.message.message_id)) return;
       if (await holdAdminOnlyWord(ctx, text2, ctx.message.message_id)) return;
+      if (await holdCleanChat(ctx, text2, ctx.message.message_id)) return;
       if (communityTrust !== "trusted" && await holdMarketingPitch(ctx, text2, ctx.message.message_id)) return;
       if (communityTrust !== "trusted" && await holdLinkFromUntrusted(ctx)) return;
     }
