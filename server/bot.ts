@@ -7796,9 +7796,24 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       const mod = await openai.moderations.create({ model: "omni-moderation-latest", input: prompt });
       if (mod.results?.[0]?.flagged) { await reply("I can't make that one. Try something else."); return; }
     } catch (e) { console.error("[imagine] moderation failed:", e); await reply("I couldn't check that prompt just now. Try again in a minute."); return; }
+    // Picture rules: family-friendly, no real people, no protected people, no copyrighted characters/logos, no fake documents.
+    try {
+      const prot = (await getProtected(ctx.chat.id)).map(p => [p.label, p.first, p.last, ...(p.names || [])].filter(Boolean).join(" / ")).filter(Boolean).slice(0, 30).join("; ");
+      const rr = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        response_format: { type: "json_object" },
+        max_tokens: 60,
+        messages: [
+          { role: "system", content: `You check picture requests for a family-friendly community. Answer JSON only: {"ok":true|false,"reason":"short"}.\nSet ok=false if the request asks for ANY of: nudity or sexual content; gore, graphic violence or scary/violent scenes; hate symbols or hateful content; a real named person (celebrity, politician, public figure, or any real individual, including these people: ${prot || "none"}); a copyrighted character, brand logo or trademarked design (Disney, Marvel, Pokemon, Nintendo, Coca-Cola and similar); fake IDs, passports, certificates, receipts, official-looking documents or anything meant to deceive; drugs, self-harm or weapons being made or used.\nSet ok=true for everything else: any art style (pixel art, cartoon, painting, anime-style, 3D, photo-style), animals, wildlife, landscapes, fantasy, original characters, memes and mild harmless fun.` },
+          { role: "user", content: prompt }
+        ]
+      });
+      const verdict = JSON.parse(rr.choices[0]?.message?.content || "{}");
+      if (verdict.ok === false) { await reply("I can't make that one. Pictures here are family-friendly: no real people, no copyrighted characters or logos, no fake documents. Try something else."); return; }
+    } catch (e) { console.error("[imagine] rules check failed:", e); await reply("I couldn't check that prompt just now. Try again in a minute."); return; }
     try { await ctx.api.sendChatAction(ctx.chat.id, "upload_photo"); } catch {}
     try {
-      const img = await generateCfImage(prompt);
+      const img = await generateCfImage(`${prompt}. Family-friendly, G-rated.`);
       await stateSet(usedKey, used + 1, 36 * 60 * 60);
       await stateIncr(totalKey, 36 * 60 * 60);
       const who = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "you");
