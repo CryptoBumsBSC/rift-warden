@@ -6,7 +6,6 @@ import { type Community as CommunityDbRow, communityProfiles, memberScores, user
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { generateImageBuffer } from "./imageGen";
 import { generateCfImage, cfImageReady } from "./cfImage";
-import { STARTER_SLURS, STARTER_BANNED } from "./starterWords";
 import * as RiftLore from "./riftLore";
 import { parseQuick, parseEvent as parseMeeting, resolveZone, formatIn, lineFor, zoneName } from "./timeconvert";
 import { stateGet, stateSet, stateDel, stateUpdate, stateIncr, stateScan, KEYS, TTL } from "./state";
@@ -5473,7 +5472,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/imagine", "/image", "/allowimage", "/denyimage", "/imageallowed", "/slurstarter", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/imagine", "/image", "/allowimage", "/denyimage", "/imageallowed", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -7716,20 +7715,6 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
   };
   ownWordCommand("banword", BANWORDS_KEY, "banned words", "Any message with it is deleted at once, with no penalty.");
   ownWordCommand("slur", SLURWORDS_KEY, "slur words", "Any message with it is deleted and the sender is banned.");
-  // /slurstarter: shows the starter lists privately. /slurstarter approve loads them. Owner, TreeFitty and @aussieboomer only.
-  bot.command("slurstarter", async (ctx) => {
-    if (!ctx.from || !ctx.chat || !isAnnouncer(ctx.from)) return;
-    const arg = (ctx.match || "").toString().trim().toLowerCase();
-    if (arg === "approve") {
-      const slurs = await stateGet<string[]>(SLURWORDS_KEY, []);
-      const banned = await stateGet<string[]>(BANWORDS_KEY, []);
-      await stateSet(SLURWORDS_KEY, Array.from(new Set([...slurs, ...STARTER_SLURS])), 5 * 365 * 24 * 60 * 60);
-      await stateSet(BANWORDS_KEY, Array.from(new Set([...banned, ...STARTER_BANNED])), 5 * 365 * 24 * 60 * 60);
-      await privateOwnerReply(ctx, `Starter lists loaded.\n${STARTER_SLURS.length} slur words (delete and ban) and ${STARTER_BANNED.length} banned words (delete only).\nSee them any time with /words. Remove one with /unslur word or /unbanword word.`);
-      return;
-    }
-    await privateOwnerReply(ctx, `Starter lists (not active yet)\n\nSLUR WORDS: message deleted and sender banned\n${STARTER_SLURS.join(", ")}\n\nBANNED WORDS: message deleted, no penalty (these can also mean something harmless)\n${STARTER_BANNED.join(", ")}\n\nTo load them all, send /slurstarter approve\nTo change first, load them and then use /unslur word or /unbanword word to remove any.\nTo add words, use /slur word or /banword word.`);
-  });
 
   bot.command("event", async (ctx) => {
     if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;

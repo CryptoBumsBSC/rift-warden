@@ -550,39 +550,6 @@ async function generateCfImage(prompt) {
   }
 }
 
-// server/starterWords.ts
-var STARTER_SLURS = [
-  "nigger",
-  "nigga",
-  "kike",
-  "chink",
-  "gook",
-  "spic",
-  "wetback",
-  "paki",
-  "coon",
-  "darkie",
-  "towelhead",
-  "raghead",
-  "faggot",
-  "tranny",
-  "shemale"
-];
-var STARTER_BANNED = [
-  "retard",
-  "retarded",
-  "fag",
-  "dyke",
-  "spastic",
-  "cripple",
-  "midget",
-  "abo",
-  "abbo",
-  "jap",
-  "gyppo",
-  "gypo"
-];
-
 // server/riftLore.ts
 var PROJECT_INFO = `Boomerverse
 
@@ -6245,7 +6212,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/imagine", "/image", "/allowimage", "/denyimage", "/imageallowed", "/slurstarter", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/imagine", "/image", "/allowimage", "/denyimage", "/imageallowed", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -8092,31 +8059,6 @@ ${effect}`);
   };
   ownWordCommand("banword", BANWORDS_KEY, "banned words", "Any message with it is deleted at once, with no penalty.");
   ownWordCommand("slur", SLURWORDS_KEY, "slur words", "Any message with it is deleted and the sender is banned.");
-  bot.command("slurstarter", async (ctx) => {
-    if (!ctx.from || !ctx.chat || !isAnnouncer(ctx.from)) return;
-    const arg = (ctx.match || "").toString().trim().toLowerCase();
-    if (arg === "approve") {
-      const slurs = await stateGet(SLURWORDS_KEY, []);
-      const banned = await stateGet(BANWORDS_KEY, []);
-      await stateSet(SLURWORDS_KEY, Array.from(/* @__PURE__ */ new Set([...slurs, ...STARTER_SLURS])), 5 * 365 * 24 * 60 * 60);
-      await stateSet(BANWORDS_KEY, Array.from(/* @__PURE__ */ new Set([...banned, ...STARTER_BANNED])), 5 * 365 * 24 * 60 * 60);
-      await privateOwnerReply(ctx, `Starter lists loaded.
-${STARTER_SLURS.length} slur words (delete and ban) and ${STARTER_BANNED.length} banned words (delete only).
-See them any time with /words. Remove one with /unslur word or /unbanword word.`);
-      return;
-    }
-    await privateOwnerReply(ctx, `Starter lists (not active yet)
-
-SLUR WORDS: message deleted and sender banned
-${STARTER_SLURS.join(", ")}
-
-BANNED WORDS: message deleted, no penalty (these can also mean something harmless)
-${STARTER_BANNED.join(", ")}
-
-To load them all, send /slurstarter approve
-To change first, load them and then use /unslur word or /unbanword word to remove any.
-To add words, use /slur word or /banword word.`);
-  });
   bot.command("event", async (ctx) => {
     if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
     const arg = (ctx.match || "").toString().trim();
