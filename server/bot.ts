@@ -6,6 +6,7 @@ import { type Community as CommunityDbRow, communityProfiles, memberScores, user
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { generateImageBuffer } from "./imageGen";
 import * as RiftLore from "./riftLore";
+import { parseQuick, parseEvent as parseMeeting, resolveZone, formatIn, lineFor, zoneName } from "./timeconvert";
 import { stateGet, stateSet, stateDel, stateUpdate, stateIncr, stateScan, KEYS, TTL } from "./state";
 import {
   detectFakeVerificationBot, detectDomainImpersonation, detectMintBait,
@@ -3050,6 +3051,7 @@ function detectConversationalTrigger(text: string): { triggered: boolean; respon
         "/fact — something worth knowing\n" +
         "/characters — the locked pieces\n" +
         "/trivia and /puzzle — games\n" +
+        "/timeconvert — meeting times in your time zone\n" +
         "/safety — how not to get robbed\n" +
         "/help — the full list",
       category: "help",
@@ -5195,6 +5197,15 @@ async function eventCronNotices(api: Bot<MyContext>["api"], chatId: number): Pro
 // === BOT SETUP ===
 export function createBot(): Bot<MyContext> {
   const bot = new Bot<MyContext>(BOT_TOKEN!);
+
+  // People type /TimeConvert on phones: treat the command word as lower case.
+  bot.use(async (ctx, next) => {
+    const m: any = ctx.message ?? ctx.editedMessage;
+    if (m?.text && m.text.startsWith("/") && /[A-Z]/.test(m.text.split(/[\s@]/)[0])) {
+      m.text = m.text.replace(/^\/[^\s@]+/, (w: string) => w.toLowerCase());
+    }
+    await next();
+  });
   botInstance = bot; // Set for auto-engage timer
 
   // Set command menu in Telegram
@@ -5209,6 +5220,8 @@ export function createBot(): Bot<MyContext> {
     { command: "radio", description: "Open Rift Radio" },
     { command: "games", description: "Play the Boomerverse arcade" },
     { command: "rules", description: "The group rules" },
+    { command: "timeconvert", description: "Meeting time in other time zones" },
+    { command: "mytimezone", description: "Save your city for meeting times" },
     { command: "faq", description: "Common questions answered" },
     { command: "report", description: "Report a message to the admins" },
     { command: "enter", description: "Enter the active giveaway" },
@@ -5257,7 +5270,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -5956,7 +5969,9 @@ _I learn from what works. Use the +1/-1 buttons and I'll get better at this._`,
       `/setbirthday [MM-DD] — Set your birthday\n` +
       `/trustinfo — Your trust score\n` +
       `/trustcheck @user — Check effective trust\n` +
-      `/myscore — Your trivia score\n\n` +
+      `/myscore — Your trivia score\n` +
+      `/timeconvert 7pm Hobart to London — meeting times in other time zones\n` +
+      `/mytimezone [city] — Save your city so meeting buttons show your time\n\n` +
       `━━ GAMES ━━\n` +
       `/trivia — Start a trivia round (add a number for more questions)\n` +
       `/answer 1-4 — Answer the current question\n` +
@@ -7527,6 +7542,54 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     await stateDel(EVENT_KEY(ctx.chat.id));
     if (Date.now() >= cur.start && Date.now() < cur.end) await ctx.api.sendMessage(ctx.chat.id, "Event mode has ended.").catch(() => {});
     await privateOwnerReply(ctx, "Event cancelled.");
+  });
+
+  // ---------- time converter: /timeconvert and /mytimezone (free for everyone, no AI) ----------
+  const tcLimited = async (key: string) => (await stateIncr(`w:tcrate:${key}`, 60)) > 6;
+  bot.command("mytimezone", async (ctx) => {
+    if (!ctx.from || !ctx.chat) return;
+    const arg = (ctx.match || "").toString().trim();
+    const tz = resolveZone(arg);
+    const text = !arg ? "Tell me your city so I can show meeting times in your time zone.\nExample: /mytimezone Los Angeles"
+      : !tz ? `I don't know the place "${arg}". Try a city like London or Los Angeles, or a name like Australia/Hobart.` : null;
+    const send = async (t: string) => { if (ctx.chat!.type === "private") await ctx.reply(t); else await privateOwnerReply(ctx, t); };
+    if (text || !tz) { await send(text!); return; }
+    await stateSet(`w:tz:${ctx.from.id}`, tz, 5 * 365 * 24 * 60 * 60);
+    await send(`Saved. Your time zone is ${tz.replace(/_/g, " ")}. Right now it is ${formatIn(Date.now(), tz)}.`);
+  });
+
+  bot.command("timeconvert", async (ctx) => {
+    if (!ctx.from || !ctx.chat) return;
+    if (ctx.chat.type === "private") { await ctx.reply("Use /timeconvert inside a group. Send /mytimezone to me here to save your city."); return; }
+    if (await tcLimited(`${ctx.chat.id}:${ctx.from.id}`)) return;
+    const arg = (ctx.match || "").toString().trim();
+    if (!arg) { await ctx.reply("Time converter\n\nQuick answer for anyone:\n/timeconvert 7pm Hobart to London, New York\n\nAdmins post a meeting time with a button:\n/timeconvert 2026-11-05 19:00 Video chat\n\nMembers save their city once with /mytimezone Los Angeles"); return; }
+    const community = await getCommunity(String(ctx.chat.id));
+    const groupTz = resolveZone(community?.timezone || "") || "Australia/Hobart";
+    const ev = parseMeeting(arg, groupTz);
+    if (ev !== null) {
+      if (typeof ev === "string") { await privateOwnerReply(ctx, ev); return; }
+      if (!(await canRunAdminCmd(ctx))) { await privateOwnerReply(ctx, "Only group admins can post a meeting time with a button. Anyone can use the quick form, for example:\n/timeconvert 7pm Hobart to London"); return; }
+      const id = Math.random().toString(36).slice(2, 10);
+      await stateSet(`w:tc:${id}`, { utc: ev.utc, title: ev.title }, 60 * 24 * 60 * 60);
+      try { await ctx.api.deleteMessage(ctx.chat.id, ctx.message!.message_id); } catch {}
+      await ctx.api.sendMessage(ctx.chat.id, `${ev.title}\n${lineFor(ev.utc, ev.tz)}\n\nTap the button to see it in your own time zone.`,
+        { reply_markup: { inline_keyboard: [[{ text: "Show my time", callback_data: `tc:${id}` }]] } });
+      return;
+    }
+    const q = parseQuick(arg);
+    if (typeof q === "string") { await ctx.reply(q); return; }
+    await ctx.reply([lineFor(q.utc, q.srcTz, q.srcLabel), "", ...q.targets.map(t => lineFor(q.utc, t.tz, t.label))].join("\n"));
+  });
+
+  bot.callbackQuery(/^tc:(\w+)$/, async (ctx) => {
+    const id = ctx.match[1];
+    if (await tcLimited(`cb:${ctx.from.id}`)) { await ctx.answerCallbackQuery({ text: "Slow down a little and try again." }).catch(() => {}); return; }
+    const ev = await stateGet<{ utc: number; title: string } | null>(`w:tc:${id}`, null);
+    if (!ev) { await ctx.answerCallbackQuery({ text: "This meeting time has expired." }).catch(() => {}); return; }
+    const tz = await stateGet<string | null>(`w:tz:${ctx.from.id}`, null);
+    if (!tz) { await ctx.answerCallbackQuery({ text: "Tell me your city first. In the group, send: /mytimezone Los Angeles (use your own city). Then tap the button again.", show_alert: true }).catch(() => {}); return; }
+    await ctx.answerCallbackQuery({ text: `${ev.title}\n${formatIn(ev.utc, tz)}\n(${zoneName(tz)})`, show_alert: true }).catch(() => {});
   });
 
   // /shareprotected  — run in the main group: every Warden group then uses that group's protected people and bot admins.

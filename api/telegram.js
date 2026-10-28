@@ -836,6 +836,219 @@ function generateRandomStory(_triggerUsername) {
   ].join("\n");
 }
 
+// server/timeconvert.ts
+var ALIASES = {
+  utc: "UTC",
+  gmt: "UTC",
+  z: "UTC",
+  est: "America/New_York",
+  edt: "America/New_York",
+  eastern: "America/New_York",
+  "us east": "America/New_York",
+  cst: "America/Chicago",
+  cdt: "America/Chicago",
+  central: "America/Chicago",
+  mst: "America/Denver",
+  mdt: "America/Denver",
+  mountain: "America/Denver",
+  pst: "America/Los_Angeles",
+  pdt: "America/Los_Angeles",
+  pacific: "America/Los_Angeles",
+  "us west": "America/Los_Angeles",
+  aest: "Australia/Sydney",
+  aedt: "Australia/Sydney",
+  acst: "Australia/Adelaide",
+  acdt: "Australia/Adelaide",
+  awst: "Australia/Perth",
+  nzst: "Pacific/Auckland",
+  nzdt: "Pacific/Auckland",
+  "new zealand": "Pacific/Auckland",
+  nz: "Pacific/Auckland",
+  bst: "Europe/London",
+  uk: "Europe/London",
+  britain: "Europe/London",
+  england: "Europe/London",
+  "united kingdom": "Europe/London",
+  cet: "Europe/Paris",
+  cest: "Europe/Paris",
+  ist: "Asia/Kolkata",
+  india: "Asia/Kolkata",
+  jst: "Asia/Tokyo",
+  japan: "Asia/Tokyo",
+  sgt: "Asia/Singapore",
+  hkt: "Asia/Hong_Kong",
+  china: "Asia/Shanghai",
+  beijing: "Asia/Shanghai",
+  korea: "Asia/Seoul",
+  tasmania: "Australia/Hobart",
+  australia: "Australia/Sydney",
+  "gold coast": "Australia/Brisbane",
+  queensland: "Australia/Brisbane",
+  "new south wales": "Australia/Sydney",
+  victoria: "Australia/Melbourne",
+  "south australia": "Australia/Adelaide",
+  "western australia": "Australia/Perth",
+  "northern territory": "Australia/Darwin",
+  canberra: "Australia/Sydney",
+  "new york": "America/New_York",
+  nyc: "America/New_York",
+  miami: "America/New_York",
+  boston: "America/New_York",
+  atlanta: "America/New_York",
+  florida: "America/New_York",
+  "washington dc": "America/New_York",
+  toronto: "America/Toronto",
+  dallas: "America/Chicago",
+  houston: "America/Chicago",
+  texas: "America/Chicago",
+  austin: "America/Chicago",
+  seattle: "America/Los_Angeles",
+  "san francisco": "America/Los_Angeles",
+  "san diego": "America/Los_Angeles",
+  "las vegas": "America/Los_Angeles",
+  california: "America/Los_Angeles",
+  la: "America/Los_Angeles",
+  "los angeles": "America/Los_Angeles",
+  mumbai: "Asia/Kolkata",
+  delhi: "Asia/Kolkata",
+  "new delhi": "Asia/Kolkata",
+  bangalore: "Asia/Kolkata",
+  dubai: "Asia/Dubai",
+  uae: "Asia/Dubai",
+  bali: "Asia/Makassar",
+  manila: "Asia/Manila",
+  philippines: "Asia/Manila",
+  "kuala lumpur": "Asia/Kuala_Lumpur",
+  vietnam: "Asia/Ho_Chi_Minh",
+  germany: "Europe/Berlin",
+  france: "Europe/Paris",
+  spain: "Europe/Madrid",
+  italy: "Europe/Rome",
+  netherlands: "Europe/Amsterdam",
+  brazil: "America/Sao_Paulo",
+  "sao paulo": "America/Sao_Paulo",
+  mexico: "America/Mexico_City",
+  canada: "America/Toronto",
+  "south africa": "Africa/Johannesburg",
+  nigeria: "Africa/Lagos",
+  kenya: "Africa/Nairobi",
+  egypt: "Africa/Cairo",
+  hawaii: "Pacific/Honolulu",
+  alaska: "America/Anchorage",
+  fiji: "Pacific/Fiji",
+  "cape town": "Africa/Johannesburg"
+};
+var index = null;
+function buildIndex() {
+  if (index) return index;
+  const m = /* @__PURE__ */ new Map();
+  let zones = [];
+  try {
+    zones = Intl.supportedValuesOf("timeZone");
+  } catch {
+  }
+  for (const z of zones) {
+    m.set(z.toLowerCase(), z);
+    const last = z.split("/").pop().replace(/_/g, " ").toLowerCase();
+    if (!m.has(last)) m.set(last, z);
+  }
+  m.set("utc", "UTC");
+  index = m;
+  return m;
+}
+var clean = (s) => s.toLowerCase().replace(/[.,]/g, " ").replace(/_/g, " ").replace(/\s+/g, " ").trim();
+function resolveZone(input) {
+  const raw = input.trim();
+  if (!raw) return null;
+  const c = clean(raw);
+  if (ALIASES[c]) return ALIASES[c];
+  const idx = buildIndex();
+  const direct = idx.get(raw.toLowerCase().replace(/\s+/g, "_")) || idx.get(c);
+  if (direct) return direct;
+  return null;
+}
+var zoneName = (tz) => tz.split("/").pop().replace(/_/g, " ");
+function offsetMs(utc, tz) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(utc));
+  const g = (t) => Number(parts.find((x) => x.type === t).value);
+  return Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"), g("second")) - utc;
+}
+function zonedToUtc(y, mo, d, h, mi, tz) {
+  const guess = Date.UTC(y, mo - 1, d, h, mi);
+  let utc = guess - offsetMs(guess, tz);
+  utc = guess - offsetMs(utc, tz);
+  return utc;
+}
+function todayIn(tz, plusDays = 0) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(/* @__PURE__ */ new Date());
+  const g = (t) => Number(parts.find((x) => x.type === t).value);
+  const dt = new Date(Date.UTC(g("year"), g("month") - 1, g("day") + plusDays));
+  return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+}
+function formatIn(utc, tz) {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: tz, weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short" }).formatToParts(new Date(utc));
+  const g = (t) => parts.find((x) => x.type === t)?.value || "";
+  return `${g("weekday")} ${g("day")} ${g("month")}, ${g("hour")}:${g("minute")} ${g("dayPeriod").toLowerCase()} ${g("timeZoneName")}`;
+}
+var lineFor = (utc, tz, label) => `${label || zoneName(tz)}: ${formatIn(utc, tz)}`;
+function readClock(h, mi, ap) {
+  let hh = Number(h);
+  const mm = mi ? Number(mi) : 0;
+  if (mm > 59) return null;
+  if (ap) {
+    if (hh < 1 || hh > 12) return null;
+    hh = hh % 12 + (ap.toLowerCase() === "pm" ? 12 : 0);
+  } else if (hh > 23) return null;
+  return { h: hh, mi: mm };
+}
+var USAGE_QUICK = "Try: /timeconvert 7pm Hobart to London, New York\nOr with a date: /timeconvert 2026-11-05 19:00 Hobart to Los Angeles";
+function parseQuick(text2) {
+  const m = text2.trim().match(/^(?:(\d{4}-\d{2}-\d{2}|today|tomorrow)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(.+?)\s+(?:to|in|into|->)\s+(.+)$/i);
+  if (!m) return USAGE_QUICK;
+  const clock = readClock(m[2], m[3], m[4]);
+  if (!clock) return "I couldn't read that time. Use 7pm, 7:30pm or 19:00.\n\n" + USAGE_QUICK;
+  const srcTz = resolveZone(m[5]);
+  if (!srcTz) return `I don't know the place "${m[5].trim()}". Try a city like London or Los Angeles, or a name like Australia/Hobart.`;
+  const targets = [];
+  for (const raw of m[6].split(/[,;&]|\band\b/i).map((s) => s.trim()).filter(Boolean).slice(0, 8)) {
+    const tz = resolveZone(raw);
+    if (!tz) return `I don't know the place "${raw}". Try a city like London or Los Angeles, or a name like Australia/Hobart.`;
+    targets.push({ tz, label: raw.replace(/\b\w/g, (c) => c.toUpperCase()) });
+  }
+  if (!targets.length) return USAGE_QUICK;
+  let y, mo, d;
+  const ds = (m[1] || "").toLowerCase();
+  if (/^\d{4}-/.test(ds)) {
+    [y, mo, d] = ds.split("-").map(Number);
+  } else {
+    const t = todayIn(srcTz, ds === "tomorrow" ? 1 : 0);
+    y = t.y;
+    mo = t.m;
+    d = t.d;
+  }
+  const utc = zonedToUtc(y, mo, d, clock.h, clock.mi, srcTz);
+  if (Number.isNaN(utc)) return "I couldn't read that date.";
+  return { utc, srcTz, srcLabel: m[5].trim().replace(/\b\w/g, (c) => c.toUpperCase()), targets };
+}
+var USAGE_EVENT = "To post a meeting time that members can check in their own time zone, send:\n/timeconvert 2026-11-05 19:00 Video chat\n\nTo use another time zone, put it before the title with a bar:\n/timeconvert 2026-11-05 19:00 London | Video chat";
+function parseEvent(text2, defaultTz) {
+  const m = text2.trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})\s*(am|pm)?\s*(.*)$/i);
+  if (!m) return null;
+  const clock = readClock(m[4], m[5], m[6]);
+  if (!clock) return "I couldn't read that time. Use 24-hour time like 19:00.\n\n" + USAGE_EVENT;
+  let tz = defaultTz, title = m[7].trim();
+  const bar = title.indexOf("|");
+  if (bar >= 0) {
+    const z = resolveZone(title.slice(0, bar));
+    if (!z) return `I don't know the place "${title.slice(0, bar).trim()}". Try a city like London or a name like Australia/Hobart.`;
+    tz = z;
+    title = title.slice(bar + 1).trim();
+  }
+  const utc = zonedToUtc(Number(m[1]), Number(m[2]), Number(m[3]), clock.h, clock.mi, tz);
+  if (Number.isNaN(utc)) return "I couldn't read that date.";
+  return { utc, tz, title: title.slice(0, 120) || "Meeting" };
+}
+
 // server/state.ts
 var UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL?.replace(/\/+$/, "") || "";
 var UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || "";
@@ -4004,7 +4217,7 @@ ${getLockedPieces()}`,
   if (isExactOrStart(["help", "commands", "what can you do"])) {
     return {
       triggered: true,
-      response: "Ask me anything about the collection with /ask, or just say it in plain English.\n\n/info \u2014 the project\n/fact \u2014 something worth knowing\n/characters \u2014 the locked pieces\n/trivia and /puzzle \u2014 games\n/safety \u2014 how not to get robbed\n/help \u2014 the full list",
+      response: "Ask me anything about the collection with /ask, or just say it in plain English.\n\n/info \u2014 the project\n/fact \u2014 something worth knowing\n/characters \u2014 the locked pieces\n/trivia and /puzzle \u2014 games\n/timeconvert \u2014 meeting times in your time zone\n/safety \u2014 how not to get robbed\n/help \u2014 the full list",
       category: "help"
     };
   }
@@ -5675,6 +5888,13 @@ async function holdEventRules(ctx, text2, messageId, media = false) {
 }
 function createBot() {
   const bot = new Bot(BOT_TOKEN);
+  bot.use(async (ctx, next) => {
+    const m = ctx.message ?? ctx.editedMessage;
+    if (m?.text && m.text.startsWith("/") && /[A-Z]/.test(m.text.split(/[\s@]/)[0])) {
+      m.text = m.text.replace(/^\/[^\s@]+/, (w) => w.toLowerCase());
+    }
+    await next();
+  });
   botInstance = bot;
   bot.api.setMyCommands([
     { command: "start", description: "Welcome message" },
@@ -5687,6 +5907,8 @@ function createBot() {
     { command: "radio", description: "Open Rift Radio" },
     { command: "games", description: "Play the Boomerverse arcade" },
     { command: "rules", description: "The group rules" },
+    { command: "timeconvert", description: "Meeting time in other time zones" },
+    { command: "mytimezone", description: "Save your city for meeting times" },
     { command: "faq", description: "Common questions answered" },
     { command: "report", description: "Report a message to the admins" },
     { command: "enter", description: "Enter the active giveaway" },
@@ -5720,7 +5942,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -6298,6 +6520,8 @@ Use /settings to see all toggles.`);
 /trustinfo \u2014 Your trust score
 /trustcheck @user \u2014 Check effective trust
 /myscore \u2014 Your trivia score
+/timeconvert 7pm Hobart to London \u2014 meeting times in other time zones
+/mytimezone [city] \u2014 Save your city so meeting buttons show your time
 
 \u2501\u2501 GAMES \u2501\u2501
 /trivia \u2014 Start a trivia round (add a number for more questions)
@@ -6895,8 +7119,8 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     }
     const levelEmojis = ["", "I", "II", "III"];
     let leaderboard = "TRUST LEADERBOARD\n\n";
-    topTrusted.forEach((member, index) => {
-      const medal = index === 0 ? "1." : index === 1 ? "2." : index === 2 ? "3." : `${index + 1}.`;
+    topTrusted.forEach((member, index2) => {
+      const medal = index2 === 0 ? "1." : index2 === 1 ? "2." : index2 === 2 ? "3." : `${index2 + 1}.`;
       const name = member.username ? `@${member.username}` : member.firstName || "Anonymous";
       const level = levelEmojis[member.trustLevel || 0];
       const status = member.trustStatus === "vouched" ? "(V)" : "";
@@ -7611,6 +7835,94 @@ While it runs: new members cannot post for their first hour, links and files fro
     if (Date.now() >= cur.start && Date.now() < cur.end) await ctx.api.sendMessage(ctx.chat.id, "Event mode has ended.").catch(() => {
     });
     await privateOwnerReply(ctx, "Event cancelled.");
+  });
+  const tcLimited = async (key) => await stateIncr(`w:tcrate:${key}`, 60) > 6;
+  bot.command("mytimezone", async (ctx) => {
+    if (!ctx.from || !ctx.chat) return;
+    const arg = (ctx.match || "").toString().trim();
+    const tz = resolveZone(arg);
+    const text2 = !arg ? "Tell me your city so I can show meeting times in your time zone.\nExample: /mytimezone Los Angeles" : !tz ? `I don't know the place "${arg}". Try a city like London or Los Angeles, or a name like Australia/Hobart.` : null;
+    const send = async (t) => {
+      if (ctx.chat.type === "private") await ctx.reply(t);
+      else await privateOwnerReply(ctx, t);
+    };
+    if (text2 || !tz) {
+      await send(text2);
+      return;
+    }
+    await stateSet(`w:tz:${ctx.from.id}`, tz, 5 * 365 * 24 * 60 * 60);
+    await send(`Saved. Your time zone is ${tz.replace(/_/g, " ")}. Right now it is ${formatIn(Date.now(), tz)}.`);
+  });
+  bot.command("timeconvert", async (ctx) => {
+    if (!ctx.from || !ctx.chat) return;
+    if (ctx.chat.type === "private") {
+      await ctx.reply("Use /timeconvert inside a group. Send /mytimezone to me here to save your city.");
+      return;
+    }
+    if (await tcLimited(`${ctx.chat.id}:${ctx.from.id}`)) return;
+    const arg = (ctx.match || "").toString().trim();
+    if (!arg) {
+      await ctx.reply("Time converter\n\nQuick answer for anyone:\n/timeconvert 7pm Hobart to London, New York\n\nAdmins post a meeting time with a button:\n/timeconvert 2026-11-05 19:00 Video chat\n\nMembers save their city once with /mytimezone Los Angeles");
+      return;
+    }
+    const community = await getCommunity(String(ctx.chat.id));
+    const groupTz = resolveZone(community?.timezone || "") || "Australia/Hobart";
+    const ev = parseEvent(arg, groupTz);
+    if (ev !== null) {
+      if (typeof ev === "string") {
+        await privateOwnerReply(ctx, ev);
+        return;
+      }
+      if (!await canRunAdminCmd(ctx)) {
+        await privateOwnerReply(ctx, "Only group admins can post a meeting time with a button. Anyone can use the quick form, for example:\n/timeconvert 7pm Hobart to London");
+        return;
+      }
+      const id = Math.random().toString(36).slice(2, 10);
+      await stateSet(`w:tc:${id}`, { utc: ev.utc, title: ev.title }, 60 * 24 * 60 * 60);
+      try {
+        await ctx.api.deleteMessage(ctx.chat.id, ctx.message.message_id);
+      } catch {
+      }
+      await ctx.api.sendMessage(
+        ctx.chat.id,
+        `${ev.title}
+${lineFor(ev.utc, ev.tz)}
+
+Tap the button to see it in your own time zone.`,
+        { reply_markup: { inline_keyboard: [[{ text: "Show my time", callback_data: `tc:${id}` }]] } }
+      );
+      return;
+    }
+    const q = parseQuick(arg);
+    if (typeof q === "string") {
+      await ctx.reply(q);
+      return;
+    }
+    await ctx.reply([lineFor(q.utc, q.srcTz, q.srcLabel), "", ...q.targets.map((t) => lineFor(q.utc, t.tz, t.label))].join("\n"));
+  });
+  bot.callbackQuery(/^tc:(\w+)$/, async (ctx) => {
+    const id = ctx.match[1];
+    if (await tcLimited(`cb:${ctx.from.id}`)) {
+      await ctx.answerCallbackQuery({ text: "Slow down a little and try again." }).catch(() => {
+      });
+      return;
+    }
+    const ev = await stateGet(`w:tc:${id}`, null);
+    if (!ev) {
+      await ctx.answerCallbackQuery({ text: "This meeting time has expired." }).catch(() => {
+      });
+      return;
+    }
+    const tz = await stateGet(`w:tz:${ctx.from.id}`, null);
+    if (!tz) {
+      await ctx.answerCallbackQuery({ text: "Tell me your city first. In the group, send: /mytimezone Los Angeles (use your own city). Then tap the button again.", show_alert: true }).catch(() => {
+      });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: `${ev.title}
+${formatIn(ev.utc, tz)}
+(${zoneName(tz)})`, show_alert: true }).catch(() => {
+    });
   });
   bot.command("shareprotected", async (ctx) => {
     if (!ctx.chat || ctx.chat.id >= 0 || !canManageProtected(ctx)) return;
