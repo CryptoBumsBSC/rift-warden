@@ -6144,7 +6144,7 @@ var ROAST_STATE_KEY = (chatId, userId) => `w:roast:${chatId}:${userId}`;
 var SAID_KEY = (chatId, userId) => `w:said:${chatId}:${userId}`;
 var ROAST_SESSION_MS = 20 * 60 * 1e3;
 var ROAST_DAILY_CAP = 15;
-var ROAST_ASK_RE = /\b(roast\s+me|roast\s+my|give\s+me\s+a\s+roast|destroy\s+me|rip\s+into\s+me)\b/i;
+var ROAST_ASK_RE = /\b(roast\s+me|roast\s+my|give\s+me\s+a\s+roast|destroy\s+me|rip\s+into\s+me)\b|\bwarden\W{0,3}\s*(please\s+)?roast\s*[!.?]*\s*$/i;
 var ROAST_UP_RE = /\b(harder|go\s+harder|worse|savage|brutal|dont\s+hold\s+back|don'?t\s+hold\s+back|bring\s+it|is\s+that\s+all|that\s+all\s+you\s+got|go\s+further|more\s+roast|do\s+it\s+again|one\s+more)\b/i;
 var ROAST_DOWN_RE = /\b(easier|softer|ease\s+up|too\s+far|too\s+much|too\s+harsh|gentle|gentler|tone\s+it\s+down|chill\s+out)\b/i;
 var ROAST_STOP_RE = /\b(stop|enough|mercy|i\s+give\s+up|i'?m\s+sorry|fair\s+enough|ok\s+ok|thanks\s+warden|thank\s+you\s+warden)\b/i;
