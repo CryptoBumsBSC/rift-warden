@@ -7563,13 +7563,23 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     if (ctx.chat.type === "private") { await ctx.reply("Use /timeconvert inside a group. Send /mytimezone to me here to save your city."); return; }
     if (await tcLimited(`${ctx.chat.id}:${ctx.from.id}`)) return;
     const arg = (ctx.match || "").toString().trim();
-    if (!arg) { await ctx.reply("Time converter\n\nQuick answer for anyone:\n/timeconvert 7pm Hobart to London, New York\n\nAdmins post a meeting time with a button:\n/timeconvert 2026-11-05 19:00 Video chat\n\nMembers save their city once with /mytimezone Los Angeles"); return; }
+    if (!arg) { await ctx.reply("Time converter\n\nQuick answer for anyone:\n/timeconvert 7pm Hobart to London, New York\n\nThe group owner and admins post a meeting time with a button:\n/timeconvert 2026-11-05 19:00 Video chat\n(To change it, reply to the meeting post with the new time)\n\nMembers save their city once with /mytimezone Los Angeles"); return; }
     const community = await getCommunity(String(ctx.chat.id));
     const groupTz = resolveZone(community?.timezone || "") || "Australia/Hobart";
     const ev = parseMeeting(arg, groupTz);
     if (ev !== null) {
       if (typeof ev === "string") { await privateOwnerReply(ctx, ev); return; }
       if (!(await canRunAdminCmd(ctx))) { await privateOwnerReply(ctx, "Only group admins can post a meeting time with a button. Anyone can use the quick form, for example:\n/timeconvert 7pm Hobart to London"); return; }
+      // Reply to an existing meeting post to change it.
+      const oldBtn = (ctx.message!.reply_to_message as any)?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data as string | undefined;
+      const oldId = oldBtn && /^tc:(\w+)$/.exec(oldBtn)?.[1];
+      if (oldId && (ctx.message!.reply_to_message as any)?.from?.is_bot && await stateGet<unknown>(`w:tc:${oldId}`, null)) {
+        await stateSet(`w:tc:${oldId}`, { utc: ev.utc, title: ev.title }, 60 * 24 * 60 * 60);
+        try { await ctx.api.deleteMessage(ctx.chat.id, ctx.message!.message_id); } catch {}
+        await ctx.api.editMessageText(ctx.chat.id, ctx.message!.reply_to_message!.message_id, `${ev.title} (updated)\n${lineFor(ev.utc, ev.tz)}\n\nTap the button to see it in your own time zone.`,
+          { reply_markup: { inline_keyboard: [[{ text: "Show my time", callback_data: `tc:${oldId}` }]] } }).catch(() => {});
+        return;
+      }
       const id = Math.random().toString(36).slice(2, 10);
       await stateSet(`w:tc:${id}`, { utc: ev.utc, title: ev.title }, 60 * 24 * 60 * 60);
       try { await ctx.api.deleteMessage(ctx.chat.id, ctx.message!.message_id); } catch {}
