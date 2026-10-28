@@ -3056,6 +3056,7 @@ function detectConversationalTrigger(text: string): { triggered: boolean; respon
         "/characters — the locked pieces\n" +
         "/trivia and /puzzle — games\n" +
         "/timeconvert — meeting times in your time zone\n" +
+        "/roast — ask me to roast you (type it alone for how it works)\n" +
         "/safety — how not to get robbed\n" +
         "/help — the full list",
       category: "help",
@@ -5403,7 +5404,7 @@ export function createBot(): Bot<MyContext> {
     { command: "rules", description: "The group rules" },
     { command: "timeconvert", description: "Meeting time in other time zones" },
     { command: "mytimezone", description: "Save your city for meeting times" },
-    { command: "roast", description: "Ask the Warden to roast you" },
+    { command: "roast", description: "Roasts: how to ask the Warden to roast you" },
     { command: "faq", description: "Common questions answered" },
     { command: "report", description: "Report a message to the admins" },
     { command: "enter", description: "Enter the active giveaway" },
@@ -7759,6 +7760,10 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       if (!(await canRunAdminCmd(ctx))) return;
       await stateSet(ROAST_ON_KEY(ctx.chat.id), arg === "on", 5 * 365 * 24 * 60 * 60);
       await privateOwnerReply(ctx, arg === "on" ? "Roasts are ON for this group." : "Roasts are OFF for this group. I will not roast anyone here, even if asked.");
+      return;
+    }
+    if (arg !== "me") {
+      await ctx.reply("Roasts - how to use it\n\n1) Ask for one:\n/roast me\nor say: Warden, roast me\n\n2) Change the level (reply to me):\nharder = up a level\neasier or too far = down a level\nstop = ends it\n\nLevels: 1 gentle tease, 2 cheeky, 3 spicy, 4 full send. It always starts gentle.\n\nI roast things you posted in this group, plus your name. No looks, family, health or anything personal.\n\n/noroast = I never roast you\n/noroast off = roast me again\nAdmins: /roast off or /roast on for the group", { reply_parameters: { message_id: ctx.message!.message_id } });
       return;
     }
     const m = ctx.message!;
