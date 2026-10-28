@@ -7779,18 +7779,18 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
     const boss = isAnnouncer(ctx.from);
     const admin = boss || (ctx.chat.type !== "private" && await isUserAdmin(ctx, ctx.from.id));
     if (!admin) { await reply("/imagine is for the owner, TreeFitty and group admins."); return; }
-    const limit = boss ? 50 : 5;
+    const limit = boss ? Infinity : 5;
     const ownerFree = String(ctx.from.id) === GLOBAL_OWNER_USER_ID || (ctx.from.username || "").toLowerCase() === "aussieboomer";
     const day = new Date().toISOString().slice(0, 10);
     const usedKey = `w:img:${ctx.from.id}:${day}`;
     const used = await stateGet<number>(usedKey, 0);
     const prompt = (ctx.match || "").toString().trim();
     if (!prompt) {
-      await reply(`Imagine - how to use it\n\n/imagine a thunder bird flying over Hobart at sunrise\n/imagine pixel art koala wearing a crown\n\nWrite what you want to see. Short and clear works best.\nYou have ${Math.max(0, limit - used)} of ${limit} pictures left today. It resets at 00:00 UTC.`);
+      await reply(`Imagine - how to use it\n\n/imagine a thunder bird flying over Hobart at sunrise\n/imagine pixel art koala wearing a crown\n\nWrite what you want to see. Short and clear works best.\n${boss ? "No personal limit for you." : `You have ${Math.max(0, limit - used)} of ${limit} pictures left today. It resets at 00:00 UTC.`}`);
       return;
     }
     if (!cfImageReady()) { await reply("Pictures are not switched on yet (the Cloudflare settings are missing)."); return; }
-    if (used >= limit) { await reply(`That's your ${limit} pictures for today. It resets at 00:00 UTC.`); return; }
+    if (!boss && used >= limit) { await reply(`That's your ${limit} pictures for today. It resets at 00:00 UTC.`); return; }
     const totalKey = `w:img:total:${day}`;
     if ((await stateGet<number>(totalKey, 0)) >= 150) { await reply("The free picture allowance is used up for today. Try again tomorrow."); return; }
     try {
@@ -7822,7 +7822,7 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       await stateSet(usedKey, used + 1, 36 * 60 * 60);
       await stateIncr(totalKey, 36 * 60 * 60);
       const who = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "you");
-      await ctx.api.sendPhoto(ctx.chat.id, new InputFile(img, "imagine.jpg"), { caption: `For ${who}: ${prompt}`.slice(0, 900) + `\n(${limit - used - 1} left today)`, reply_parameters: { message_id: m.message_id } });
+      await ctx.api.sendPhoto(ctx.chat.id, new InputFile(img, "imagine.jpg"), { caption: `For ${who}: ${prompt}`.slice(0, 900) + (boss ? "" : `\n(${limit - used - 1} left today)`), reply_parameters: { message_id: m.message_id } });
     } catch (e) {
       console.error("[imagine] failed:", e);
       await reply("The picture didn't come out. It did not count against your limit. Try again.");
