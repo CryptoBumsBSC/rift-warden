@@ -8153,6 +8153,7 @@ While it runs: new members cannot post for their first hour, links and files fro
       return;
     }
     const limit = boss ? 50 : 5;
+    const ownerFree = String(ctx.from.id) === GLOBAL_OWNER_USER_ID || (ctx.from.username || "").toLowerCase() === "aussieboomer";
     const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     const usedKey = `w:img:${ctx.from.id}:${day}`;
     const used = await stateGet(usedKey, 0);
@@ -8182,7 +8183,10 @@ You have ${Math.max(0, limit - used)} of ${limit} pictures left today. It resets
     }
     try {
       const mod = await openai3.moderations.create({ model: "omni-moderation-latest", input: prompt });
-      if (mod.results?.[0]?.flagged) {
+      const cats = mod.results?.[0]?.categories || {};
+      const flaggedCats = Object.keys(cats).filter((k) => cats[k]);
+      const blocked = ownerFree ? flaggedCats.filter((k) => !["violence", "violence/graphic", "illicit/violent", "illicit"].includes(k)) : flaggedCats;
+      if (blocked.length) {
         await reply("I can't make that one. Try something else.");
         return;
       }
@@ -8199,7 +8203,7 @@ You have ${Math.max(0, limit - used)} of ${limit} pictures left today. It resets
         max_tokens: 60,
         messages: [
           { role: "system", content: `You check picture requests for a family-friendly community. Answer JSON only: {"ok":true|false,"reason":"short"}.
-Set ok=false if the request asks for ANY of: nudity or sexual content; gore, graphic violence or scary/violent scenes; hate symbols or hateful content; a real named person (celebrity, politician, public figure, or any real individual, including these people: ${prot || "none"}); a copyrighted character, brand logo or trademarked design (Disney, Marvel, Pokemon, Nintendo, Coca-Cola and similar); fake IDs, passports, certificates, receipts, official-looking documents or anything meant to deceive; drugs, self-harm or weapons being made or used.
+Set ok=false if the request asks for ANY of: nudity or sexual content; ${ownerFree ? "" : "gore, graphic violence or scary/violent scenes; "} hate symbols or hateful content; a real named person (celebrity, politician, public figure, or any real individual, including these people: ${prot || "none"}); a copyrighted character, brand logo or trademarked design (Disney, Marvel, Pokemon, Nintendo, Coca-Cola and similar); fake IDs, passports, certificates, receipts, official-looking documents or anything meant to deceive; ${ownerFree ? "self-harm instructions" : "drugs, self-harm or weapons being made or used"}.
 Set ok=true for everything else: any art style (pixel art, cartoon, painting, anime-style, 3D, photo-style), animals, wildlife, landscapes, fantasy, original characters, memes and mild harmless fun.` },
           { role: "user", content: prompt }
         ]
@@ -8219,7 +8223,7 @@ Set ok=true for everything else: any art style (pixel art, cartoon, painting, an
     } catch {
     }
     try {
-      const img = await generateCfImage(`${prompt}. Family-friendly, G-rated.`);
+      const img = await generateCfImage(ownerFree ? prompt : `${prompt}. Family-friendly, G-rated.`);
       await stateSet(usedKey, used + 1, 36 * 60 * 60);
       await stateIncr(totalKey, 36 * 60 * 60);
       const who = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || "you";
