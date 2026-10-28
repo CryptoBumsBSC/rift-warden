@@ -6153,8 +6153,17 @@ var ROAST_LEVELS = {
   1: "LEVEL 1 of 4 (gentle tease): one short, affectionate, playful line. A nudge, not a punch.",
   2: "LEVEL 2 of 4 (cheeky): one or two sentences. Sharper. Use a specific callback to something they posted.",
   3: "LEVEL 3 of 4 (spicy): two or three sentences. A proper comedy roast with specific callbacks. Funny first, mean never. Mild Aussie swearing like 'bloody' is fine.",
-  4: "LEVEL 4 of 4 (full send): three or four sentences of theatrical, merciless comedy aimed at the things they post and how they behave in the chat. Still funny, still inside the hard limits."
+  4: "LEVEL 4 of 4 (full send): three or four sentences of theatrical, merciless comedy aimed at the things they post and how they behave in the chat. Still funny, still inside the hard limits.",
+  10: "LEVEL 10 (NUCLEAR): the most over-the-top, theatrical, relentless comedy roast you can write: five or six sentences, escalating line by line, so savage and absurd that the person laughs out loud. Specific callbacks to everything in the material. Mild swearing (bloody, bugger, arse) is fine. It must still stay inside the hard limits: no slurs, nothing about looks, family, health, identity or anything real-world."
 };
+var ROAST_PICK_RE = /\b(?:level|lvl)\s*(10|[1-4])\b|\broast\s+me\s+(?:at\s+)?(10|[1-4])\b|\b(nuclear|nuke)\b/i;
+function roastPick(text2) {
+  const m = text2.match(ROAST_PICK_RE);
+  if (!m) return null;
+  if (m[3]) return 10;
+  return Number(m[1] || m[2]);
+}
+var roastLabel = (l) => l >= 10 ? "10 (NUCLEAR)" : `${l} of 4`;
 var ROAST_HARD_LIMITS = `HARD LIMITS at every level: no slurs, no hate. Nothing about race, ethnicity, nationality, religion, gender, sexuality, disability, health, mental health, body or looks, age, family, relationships, money, death, or self-harm. No threats. No real-world details (where they live, work, or who they are). No telling anyone to hurt themselves. Roast what they SAID and how they act in this chat only. If their messages show sadness, grief, illness or a problem, do not use that as material: tease their username or a harmless message instead, or stay at level 1. If they seem young (school, parents), stay at level 1. Never roast the project, the owner (@aussieboomer) or any admin. Never invent facts about them: only use the material given. Do not quote more than a few words at a time. Plain text, no hashtags, no emoji spam.`;
 async function roastEnabled(chatId) {
   return await stateGet(ROAST_ON_KEY(chatId), null) !== false;
@@ -6193,12 +6202,12 @@ async function roastCap(ctx, from) {
   return { max: 4, banter: false };
 }
 async function generateRoast(who, username, level, material, justSaid, banter = false, comeback = false) {
-  const lvl = Math.max(1, Math.min(4, level));
+  const lvl = level >= 10 ? 10 : Math.max(1, Math.min(4, level));
   try {
     const r = await openai3.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.9,
-      max_tokens: 160,
+      max_tokens: lvl >= 10 ? 300 : 160,
       messages: [
         { role: "system", content: `You are The Warden: dry, observant, cheeky and Australian. A member asked for, or earned, a roast.
 ${ROAST_LEVELS[lvl]}${banter ? "\nTHIS PERSON IS A MATE AND PART OF THE TEAM: keep it warm, friendly banter between mates. Tease lightly, never bite. They should laugh and feel liked." : ""}${comeback ? "\nTHEY ASKED YOU TO STOP EARLIER AND THEN STARTED AGAIN. Open by gleefully noting they came back for more, then give them plenty." : ""}
@@ -6232,7 +6241,9 @@ async function handleRoastRequest(ctx, text2, inConversation) {
   if (!asking && !(active && inConversation)) return false;
   const cap = await roastCap(ctx, from);
   const pref = await stateGet(prefKey, 1);
-  let level = active ? state.level : Math.max(1, Math.min(cap.max, pref - 1));
+  const limitTo = (l) => cap.max < 4 ? Math.min(cap.max, l >= 10 ? 4 : l) : l;
+  const picked = roastPick(text2);
+  let level = active ? state.level : pref >= 10 ? 3 : Math.max(1, Math.min(cap.max, pref - 1));
   let comeback = false;
   if (!asking) {
     if (ROAST_STOP_RE.test(text2)) {
@@ -6241,16 +6252,18 @@ async function handleRoastRequest(ctx, text2, inConversation) {
       await ctx.reply("Mercy granted. Roast closed. You can ask again any time.", { reply_parameters: { message_id: ctx.message.message_id } });
       return true;
     }
-    if (ROAST_UP_RE.test(text2)) level = Math.min(cap.max, level + 1);
-    else if (ROAST_DOWN_RE.test(text2)) level = Math.max(1, level - 1);
+    if (picked) level = limitTo(picked);
+    else if (ROAST_UP_RE.test(text2)) level = level >= 10 ? 10 : Math.min(cap.max, level + 1);
+    else if (ROAST_DOWN_RE.test(text2)) level = level >= 10 ? 4 : Math.max(1, level - 1);
     else return false;
   } else {
-    if (active && ROAST_UP_RE.test(text2)) level = Math.min(cap.max, level + 1);
+    if (active && ROAST_UP_RE.test(text2)) level = level >= 10 ? 10 : Math.min(cap.max, level + 1);
     if (!active && await stateGet(stopKey, null)) {
       comeback = true;
       level = Math.min(cap.max, Math.max(3, level));
       await stateDel(stopKey);
     }
+    if (picked) level = limitTo(picked);
   }
   if (!await roastCanTarget(ctx, from, true)) return false;
   const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
@@ -6258,13 +6271,17 @@ async function handleRoastRequest(ctx, text2, inConversation) {
     await ctx.reply("That's your roast quota for today. Come back tomorrow.", { reply_parameters: { message_id: ctx.message.message_id } });
     return true;
   }
+  if (level >= 10 && await stateIncr(`w:roastnuke:${from.id}:${day}`, 36 * 60 * 60) > 3) {
+    level = 4;
+    await ctx.reply("That's three nuclear roasts today. Back to level 4 until tomorrow.", { reply_parameters: { message_id: ctx.message.message_id } });
+  }
   const uname = from.username;
   const roast = await generateRoast(from.first_name || uname || "mate", uname, level, await roastMaterial(chat.id, from.id), text2, cap.banter, comeback);
   await stateSet(key, { level, t: Date.now() }, 60 * 60);
   await stateSet(prefKey, level, 90 * 24 * 60 * 60);
   const tag = !active || state.level !== level ? `
 
-(Roast level ${level} of 4. Say "harder" or "easier", or "stop".)` : "";
+(Roast level ${roastLabel(level)}. Say "harder", "easier" or "stop", or pick: level 1, 2, 3, 4, or "nuclear".)` : "";
   await ctx.reply(roast + tag, { reply_parameters: { message_id: ctx.message.message_id } });
   return true;
 }
@@ -8385,8 +8402,8 @@ While it runs: new members cannot post for their first hour, links and files fro
       await privateOwnerReply(ctx, arg === "on" ? "Roasts are ON for this group." : "Roasts are OFF for this group. I will not roast anyone here, even if asked.");
       return;
     }
-    if (arg !== "me") {
-      await ctx.reply("Roasts - how to use it\n\n1) Ask for one:\n/roast me\nor say: Warden, roast me\n\n2) Change the level (reply to me):\nharder = up a level\neasier or too far = down a level\nstop = ends it\n\nLevels: 1 gentle tease, 2 cheeky, 3 spicy, 4 full send. It always starts gentle.\n\nI roast things you posted in this group, plus your name. No looks, family, health or anything personal.\n\n/noroast = I never roast you\n/noroast off = roast me again\nAdmins: /roast off or /roast on for the group", { reply_parameters: { message_id: ctx.message.message_id } });
+    if (!/^me\b/.test(arg) && !roastPick(arg)) {
+      await ctx.reply("Roasts - how to use it\n\n1) Ask for one:\n/roast me\nor say: Warden, roast me\n\n2) Pick a level:\n/roast me 3\n/roast me nuclear\n\n3) Change the level (reply to me):\nharder = up a level\neasier or too far = down a level\nstop = ends it\n\nLevels: 1 gentle tease, 2 cheeky, 3 spicy, 4 full send, and 10 = NUCLEAR (you must ask for it by name, 3 a day). If you do not pick, it starts gentle and follows what you say. Rude members get a level that matches how rude they were (up to 3).\n\nI roast things you posted in this group, plus your name. No looks, family, health or anything personal.\n\n/noroast = I never roast you\n/noroast off = roast me again\nAdmins: /roast off or /roast on for the group", { reply_parameters: { message_id: ctx.message.message_id } });
       return;
     }
     const m = ctx.message;
@@ -8405,7 +8422,10 @@ While it runs: new members cannot post for their first hour, links and files fro
     const stopKey = `w:roaststop:${ctx.chat.id}:${ctx.from.id}`;
     const comeback = !!await stateGet(stopKey, null);
     if (comeback) await stateDel(stopKey);
-    const startLevel = comeback ? Math.min(cap.max, 3) : 1;
+    let startLevel = comeback ? Math.min(cap.max, 3) : 1;
+    const pickedLvl = roastPick(arg);
+    if (pickedLvl) startLevel = cap.max < 4 ? Math.min(cap.max, pickedLvl >= 10 ? 4 : pickedLvl) : pickedLvl;
+    if (startLevel >= 10 && await stateIncr(`w:roastnuke:${ctx.from.id}:${day}`, 36 * 60 * 60) > 3) startLevel = 4;
     const roast = await generateRoast(ctx.from.first_name || uname || "mate", uname, startLevel, await roastMaterial(ctx.chat.id, ctx.from.id), "/roast", cap.banter, comeback);
     await stateSet(key, { level: startLevel, t: Date.now() }, 60 * 60);
     await stateSet(`w:roastpref:${ctx.from.id}`, startLevel, 90 * 24 * 60 * 60);
@@ -8413,7 +8433,7 @@ While it runs: new members cannot post for their first hour, links and files fro
     });
     await ctx.reply(roast + `
 
-(Roast level ${startLevel} of 4. Reply to me with "harder" or "easier", or "stop".)`, { reply_parameters: { message_id: m.message_id } });
+(Roast level ${roastLabel(startLevel)}. Reply to me with "harder", "easier" or "stop", or pick a level.)`, { reply_parameters: { message_id: m.message_id } });
   });
   bot.command("noroast", async (ctx) => {
     if (!ctx.from) return;
