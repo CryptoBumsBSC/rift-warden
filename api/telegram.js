@@ -3494,9 +3494,18 @@ async function updateUserRudeness(telegramUserId, username, firstName, isRude, i
     return { rudeStrikes: 0, lastRudeDate: null, wasNiceAfterRude: false };
   }
 }
-function getWardenRudenessContext(status, isCurrentlyRude) {
+function getWardenRudenessContext(status, isCurrentlyRude, roast) {
   if (status.rudeStrikes === 0) {
     return "";
+  }
+  if (isCurrentlyRude && roast) {
+    const lvl = rudeRoastLevel(status.rudeStrikes);
+    return `This member was just rude and has been rude ${status.rudeStrikes} time(s). Answer any real question briefly, then fire back with a roast.
+${ROAST_LEVELS[lvl]}
+Things they posted in this group:
+${roast.material || "(nothing seen yet, so roast the rude remark itself)"}
+
+${ROAST_HARD_LIMITS}`;
   }
   if (isCurrentlyRude) {
     if (status.rudeStrikes >= 5) {
@@ -5875,6 +5884,136 @@ async function holdCleanChat(ctx, text2, messageId) {
     return false;
   }
 }
+var ROAST_ON_KEY = (chatId) => `w:roaston:${chatId}`;
+var ROAST_NO_KEY = (userId) => `w:noroast:${userId}`;
+var ROAST_STATE_KEY = (chatId, userId) => `w:roast:${chatId}:${userId}`;
+var SAID_KEY = (chatId, userId) => `w:said:${chatId}:${userId}`;
+var ROAST_SESSION_MS = 20 * 60 * 1e3;
+var ROAST_DAILY_CAP = 15;
+var ROAST_ASK_RE = /\b(roast\s+me|roast\s+my|give\s+me\s+a\s+roast|destroy\s+me|rip\s+into\s+me)\b/i;
+var ROAST_UP_RE = /\b(harder|go\s+harder|worse|savage|brutal|dont\s+hold\s+back|don'?t\s+hold\s+back|bring\s+it|is\s+that\s+all|that\s+all\s+you\s+got|go\s+further|more\s+roast|do\s+it\s+again|one\s+more)\b/i;
+var ROAST_DOWN_RE = /\b(easier|softer|ease\s+up|too\s+far|too\s+much|too\s+harsh|gentle|gentler|tone\s+it\s+down|chill\s+out)\b/i;
+var ROAST_STOP_RE = /\b(stop|enough|mercy|i\s+give\s+up|i'?m\s+sorry|fair\s+enough|ok\s+ok|thanks\s+warden|thank\s+you\s+warden)\b/i;
+var ROAST_BAD_OUT_RE = /\b(kys|kill\s+yourself|kill\s+your|n[i1]gg|f[a@]gg?[o0]t|retard|tranny|rape|hang\s+yourself)\b/i;
+var ROAST_LEVELS = {
+  1: "LEVEL 1 of 4 (gentle tease): one short, affectionate, playful line. A nudge, not a punch.",
+  2: "LEVEL 2 of 4 (cheeky): one or two sentences. Sharper. Use a specific callback to something they posted.",
+  3: "LEVEL 3 of 4 (spicy): two or three sentences. A proper comedy roast with specific callbacks. Funny first, mean never. Mild Aussie swearing like 'bloody' is fine.",
+  4: "LEVEL 4 of 4 (full send): three or four sentences of theatrical, merciless comedy aimed at the things they post and how they behave in the chat. Still funny, still inside the hard limits."
+};
+var ROAST_HARD_LIMITS = `HARD LIMITS at every level: no slurs, no hate. Nothing about race, ethnicity, nationality, religion, gender, sexuality, disability, health, mental health, body or looks, age, family, relationships, money, death, or self-harm. No threats. No real-world details (where they live, work, or who they are). No telling anyone to hurt themselves. Roast what they SAID and how they act in this chat only. If their messages show sadness, grief, illness or a problem, do not use that as material: tease their username or a harmless message instead, or stay at level 1. If they seem young (school, parents), stay at level 1. Never roast the project, the owner (@aussieboomer) or any admin. Never invent facts about them: only use the material given. Do not quote more than a few words at a time. Plain text, no hashtags, no emoji spam.`;
+async function roastEnabled(chatId) {
+  return await stateGet(ROAST_ON_KEY(chatId), null) !== false;
+}
+async function rememberSaid(chatId, userId, text2) {
+  const clean2 = text2.replace(/https?:\/\/\S+|t\.me\/\S+|0x[a-fA-F0-9]{20,}|@\w+/g, "").replace(/\s+/g, " ").trim();
+  if (clean2.length < 15) return;
+  const key = SAID_KEY(chatId, userId);
+  const list = await stateGet(key, []);
+  list.push(clean2.slice(0, 140));
+  await stateSet(key, list.slice(-8), 14 * 24 * 60 * 60);
+}
+async function roastMaterial(chatId, userId) {
+  const list = await stateGet(SAID_KEY(chatId, userId), []);
+  return list.length ? list.map((x) => `- "${x}"`).join("\n") : "";
+}
+function rudeRoastLevel(strikes) {
+  return strikes >= 5 ? 3 : strikes >= 2 ? 2 : 1;
+}
+async function roastCanTarget(ctx, from, asked = false) {
+  if (!ctx.chat || ctx.chat.id >= 0) return false;
+  if (await stateGet(ROAST_NO_KEY(from.id), false)) return false;
+  if (!await roastEnabled(ctx.chat.id)) return false;
+  if (!asked) {
+    if (isAnnouncer(from)) return false;
+    if (await isUserAdmin(ctx, from.id)) return false;
+    const people = await getProtected(ctx.chat.id);
+    if (people.some((pp) => pp.id && pp.id === String(from.id) || pp.username && from.username && pp.username.toLowerCase() === from.username.toLowerCase())) return false;
+  }
+  return true;
+}
+async function roastCap(ctx, from) {
+  if (isAnnouncer(from)) return { max: 2, banter: true };
+  const people = ctx.chat ? await getProtected(ctx.chat.id) : [];
+  if (people.some((pp) => pp.id && pp.id === String(from.id) || pp.username && from.username && pp.username.toLowerCase() === from.username.toLowerCase())) return { max: 2, banter: true };
+  return { max: 4, banter: false };
+}
+async function generateRoast(who, username, level, material, justSaid, banter = false, comeback = false) {
+  const lvl = Math.max(1, Math.min(4, level));
+  try {
+    const r = await openai3.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.9,
+      max_tokens: 160,
+      messages: [
+        { role: "system", content: `You are The Warden: dry, observant, cheeky and Australian. A member asked for, or earned, a roast.
+${ROAST_LEVELS[lvl]}${banter ? "\nTHIS PERSON IS A MATE AND PART OF THE TEAM: keep it warm, friendly banter between mates. Tease lightly, never bite. They should laugh and feel liked." : ""}${comeback ? "\nTHEY ASKED YOU TO STOP EARLIER AND THEN STARTED AGAIN. Open by gleefully noting they came back for more, then give them plenty." : ""}
+
+${ROAST_HARD_LIMITS.replace("Never roast the project, the owner (@aussieboomer) or any admin.", "Never roast the project.")}` },
+        { role: "user", content: `Member: ${who}${username ? ` (@${username})` : ""}
+What they just said to you: "${justSaid.slice(0, 200)}"
+Things they posted in this group:
+${material || "(nothing seen yet, so work from their name and what they just said)"}
+
+Write the roast now.` }
+      ]
+    });
+    const out = (r.choices[0]?.message?.content || "").trim();
+    if (!out || ROAST_BAD_OUT_RE.test(out)) return lvl >= 3 ? "I had a line ready, but it was too good for this chat. You're welcome." : "I'd roast you, but you're doing a fine job of it yourself.";
+    return out;
+  } catch (e) {
+    console.error("[roast] failed:", e);
+    return "My roast machine is down. Lucky you.";
+  }
+}
+async function handleRoastRequest(ctx, text2, inConversation) {
+  const from = ctx.from, chat = ctx.chat;
+  if (!from || !chat || chat.id >= 0 || from.is_bot || !ctx.message) return false;
+  const asking = ROAST_ASK_RE.test(text2);
+  const key = ROAST_STATE_KEY(chat.id, from.id);
+  const stopKey = `w:roaststop:${chat.id}:${from.id}`;
+  const prefKey = `w:roastpref:${from.id}`;
+  const state = await stateGet(key, null);
+  const active = !!state && Date.now() - state.t < ROAST_SESSION_MS;
+  if (!asking && !(active && inConversation)) return false;
+  const cap = await roastCap(ctx, from);
+  const pref = await stateGet(prefKey, 1);
+  let level = active ? state.level : Math.max(1, Math.min(cap.max, pref - 1));
+  let comeback = false;
+  if (!asking) {
+    if (ROAST_STOP_RE.test(text2)) {
+      await stateDel(key);
+      await stateSet(stopKey, Date.now(), 7 * 24 * 60 * 60);
+      await ctx.reply("Mercy granted. Roast closed. You can ask again any time.", { reply_parameters: { message_id: ctx.message.message_id } });
+      return true;
+    }
+    if (ROAST_UP_RE.test(text2)) level = Math.min(cap.max, level + 1);
+    else if (ROAST_DOWN_RE.test(text2)) level = Math.max(1, level - 1);
+    else return false;
+  } else {
+    if (active && ROAST_UP_RE.test(text2)) level = Math.min(cap.max, level + 1);
+    if (!active && await stateGet(stopKey, null)) {
+      comeback = true;
+      level = Math.min(cap.max, Math.max(3, level));
+      await stateDel(stopKey);
+    }
+  }
+  if (!await roastCanTarget(ctx, from, true)) return false;
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  if (await stateIncr(`w:roastcap:${from.id}:${day}`, 36 * 60 * 60) > ROAST_DAILY_CAP) {
+    await ctx.reply("That's your roast quota for today. Come back tomorrow.", { reply_parameters: { message_id: ctx.message.message_id } });
+    return true;
+  }
+  const uname = from.username;
+  const roast = await generateRoast(from.first_name || uname || "mate", uname, level, await roastMaterial(chat.id, from.id), text2, cap.banter, comeback);
+  await stateSet(key, { level, t: Date.now() }, 60 * 60);
+  await stateSet(prefKey, level, 90 * 24 * 60 * 60);
+  const tag = !active || state.level !== level ? `
+
+(Roast level ${level} of 4. Say "harder" or "easier", or "stop".)` : "";
+  await ctx.reply(roast + tag, { reply_parameters: { message_id: ctx.message.message_id } });
+  return true;
+}
 var ATALL_RE = /(^|\s)@all\b/i;
 var ATALL_KEY = (chatId) => `w:atall:${chatId}`;
 function isAnnouncer(from) {
@@ -5995,6 +6134,7 @@ function createBot() {
     { command: "rules", description: "The group rules" },
     { command: "timeconvert", description: "Meeting time in other time zones" },
     { command: "mytimezone", description: "Save your city for meeting times" },
+    { command: "roast", description: "Ask the Warden to roast you" },
     { command: "faq", description: "Common questions answered" },
     { command: "report", description: "Report a message to the admins" },
     { command: "enter", description: "Enter the active giveaway" },
@@ -6028,7 +6168,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -7958,6 +8098,53 @@ While it runs: new members cannot post for their first hour, links and files fro
       }
     }
   }
+  bot.command("roast", async (ctx) => {
+    if (!ctx.from || !ctx.chat) return;
+    if (ctx.chat.type === "private") {
+      await ctx.reply("Use /roast inside a group.");
+      return;
+    }
+    const arg = (ctx.match || "").toString().trim().toLowerCase();
+    if (arg === "on" || arg === "off") {
+      if (!await canRunAdminCmd(ctx)) return;
+      await stateSet(ROAST_ON_KEY(ctx.chat.id), arg === "on", 5 * 365 * 24 * 60 * 60);
+      await privateOwnerReply(ctx, arg === "on" ? "Roasts are ON for this group." : "Roasts are OFF for this group. I will not roast anyone here, even if asked.");
+      return;
+    }
+    const m = ctx.message;
+    const uname = ctx.from.username;
+    if (!await roastCanTarget(ctx, ctx.from, true)) {
+      await ctx.reply("Not today. (Either roasts are off here, or you opted out with /noroast.)", { reply_parameters: { message_id: m.message_id } });
+      return;
+    }
+    const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    if (await stateIncr(`w:roastcap:${ctx.from.id}:${day}`, 36 * 60 * 60) > ROAST_DAILY_CAP) {
+      await ctx.reply("That's your roast quota for today. Come back tomorrow.", { reply_parameters: { message_id: m.message_id } });
+      return;
+    }
+    const key = ROAST_STATE_KEY(ctx.chat.id, ctx.from.id);
+    const cap = await roastCap(ctx, ctx.from);
+    const stopKey = `w:roaststop:${ctx.chat.id}:${ctx.from.id}`;
+    const comeback = !!await stateGet(stopKey, null);
+    if (comeback) await stateDel(stopKey);
+    const startLevel = comeback ? Math.min(cap.max, 3) : 1;
+    const roast = await generateRoast(ctx.from.first_name || uname || "mate", uname, startLevel, await roastMaterial(ctx.chat.id, ctx.from.id), "/roast", cap.banter, comeback);
+    await stateSet(key, { level: startLevel, t: Date.now() }, 60 * 60);
+    await stateSet(`w:roastpref:${ctx.from.id}`, startLevel, 90 * 24 * 60 * 60);
+    await activateConversation(ctx.chat.id, ctx.from.id).catch(() => {
+    });
+    await ctx.reply(roast + `
+
+(Roast level ${startLevel} of 4. Reply to me with "harder" or "easier", or "stop".)`, { reply_parameters: { message_id: m.message_id } });
+  });
+  bot.command("noroast", async (ctx) => {
+    if (!ctx.from) return;
+    const arg = (ctx.match || "").toString().trim().toLowerCase();
+    await stateSet(ROAST_NO_KEY(ctx.from.id), arg !== "off", 5 * 365 * 24 * 60 * 60);
+    const msg = arg === "off" ? "Fine. You're roastable again." : "Done. I will not roast you, even if you are rude to me. Send /noroast off to change your mind.";
+    if (ctx.chat?.type === "private") await ctx.reply(msg);
+    else await privateOwnerReply(ctx, msg);
+  });
   bot.command("cleanchat", async (ctx) => {
     if (!ctx.from || !ctx.chat) return;
     if (ctx.chat.type === "private") {
@@ -11469,6 +11656,12 @@ Admins, please review!`;
         await updateTrustActivity(userIdStr, chatIdStr, "message", text2.length);
       }
     }
+    if (chatId && chatId < 0 && ctx.from && !ctx.from.is_bot && !text2.startsWith("/")) {
+      try {
+        await rememberSaid(chatId, ctx.from.id, text2);
+      } catch {
+      }
+    }
     const { isRude, isNice } = detectRudeness(text2);
     const rudenessStatus = await updateUserRudeness(userId, username, ctx.from?.first_name, isRude, isNice);
     if (text2.startsWith("/")) {
@@ -11568,6 +11761,9 @@ Leaderboard: /puzzleboard (daily/weekly/monthly rankings)
     if (directBotMention || replyToWarden) {
       activeConversation = await activateConversation(conversationChatId, ctx.from?.id || userId);
     }
+    if (chatId && chatId < 0 && (directBotMention || replyToWarden || activeConversation)) {
+      if (await handleRoastRequest(ctx, text2, Boolean(activeConversation || directBotMention || replyToWarden))) return;
+    }
     const replyingToSomeoneElse = Boolean(ctx.message.reply_to_message?.from && ctx.message.reply_to_message.from.id !== ctx.me.id);
     if (activeConversation && !replyingToSomeoneElse) {
       shouldRespond = true;
@@ -11618,7 +11814,8 @@ Leaderboard: /puzzleboard (daily/weekly/monthly rankings)
       }
       const returningContext = trackingUserId ? await getReturningUserContext(trackingUserId) : null;
       const memberMemoryContext = trackingUserId ? await getMemberMemoryContext(trackingUserId, chatIdStr) : "";
-      const rudenessContext = getWardenRudenessContext(rudenessStatus, isRude);
+      const _canRoastRude = isRude && chatId && chatId < 0 && ctx.from ? await roastCanTarget(ctx, ctx.from, false) : false;
+      const rudenessContext = getWardenRudenessContext(rudenessStatus, isRude, _canRoastRude ? { material: await roastMaterial(chatId, ctx.from.id) } : void 0);
       if (useWardenAttitude) {
         const questionText = text2.replace(/warden/gi, "").trim() || text2;
         const gamesResult = detectGamesQuery(text2);

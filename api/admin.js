@@ -784,6 +784,7 @@ var MUTE_DURATIONS = [
 ];
 var PILE_WINDOW_MS = 10 * 60 * 1e3;
 var PILE_FREEZE_MS = 10 * 60 * 1e3;
+var ROAST_SESSION_MS = 20 * 60 * 1e3;
 
 // server/adminRoutes.ts
 var ROLE_RANK = { moderator: 1, admin: 2, owner: 3 };
