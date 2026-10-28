@@ -532,6 +532,32 @@ async function generateImageBuffer(prompt, size = "1024x1024", quality = "auto")
   return Buffer2.from(base64, "base64");
 }
 
+// server/cfImage.ts
+import { Buffer as Buffer3 } from "node:buffer";
+var cfImageReady = () => Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
+async function generateCfImage(prompt) {
+  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (!account || !token) throw new Error("Cloudflare settings missing");
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 45e3);
+  try {
+    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/@cf/black-forest-labs/flux-1-schnell`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: prompt.slice(0, 2e3), steps: 4 }),
+      signal: ctl.signal
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body) throw new Error(`Cloudflare ${res.status}: ${JSON.stringify(body?.errors || body || "").slice(0, 200)}`);
+    const b64 = body.result?.image ?? body.image;
+    if (!b64) throw new Error("Cloudflare returned no image");
+    return Buffer3.from(b64, "base64");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // server/riftLore.ts
 var PROJECT_INFO = `Boomerverse
 
@@ -6426,6 +6452,7 @@ function createBot() {
     { command: "timeconvert", description: "Meeting time in other time zones" },
     { command: "mytimezone", description: "Save your city for meeting times" },
     { command: "roast", description: "Roasts: how to ask the Warden to roast you" },
+    { command: "imagine", description: "Make a picture (owner, TreeFitty, admins)" },
     { command: "faq", description: "Common questions answered" },
     { command: "report", description: "Report a message to the admins" },
     { command: "enter", description: "Enter the active giveaway" },
@@ -6459,7 +6486,7 @@ function createBot() {
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/imagine", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
       if (text2.startsWith("/")) {
         const cmdBase = text2.split(/[\s@]/)[0].toLowerCase();
         if (FREE_COMMANDS.some((fc) => cmdBase === fc)) return next();
@@ -8389,6 +8416,71 @@ While it runs: new members cannot post for their first hour, links and files fro
       }
     }
   }
+  bot.command("imagine", async (ctx) => {
+    if (!ctx.from || !ctx.chat || !ctx.message) return;
+    const m = ctx.message;
+    const reply = (t) => ctx.reply(t, { reply_parameters: { message_id: m.message_id } });
+    const boss = isAnnouncer(ctx.from);
+    const admin = boss || ctx.chat.type !== "private" && await isUserAdmin(ctx, ctx.from.id);
+    if (!admin) {
+      await reply("/imagine is for the owner, TreeFitty and group admins.");
+      return;
+    }
+    const limit = boss ? 20 : 3;
+    const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const usedKey = `w:img:${ctx.from.id}:${day}`;
+    const used = await stateGet(usedKey, 0);
+    const prompt = (ctx.match || "").toString().trim();
+    if (!prompt) {
+      await reply(`Imagine - how to use it
+
+/imagine a thunder bird flying over Hobart at sunrise
+/imagine pixel art koala wearing a crown
+
+Write what you want to see. Short and clear works best.
+You have ${Math.max(0, limit - used)} of ${limit} pictures left today. It resets at 00:00 UTC.`);
+      return;
+    }
+    if (!cfImageReady()) {
+      await reply("Pictures are not switched on yet (the Cloudflare settings are missing).");
+      return;
+    }
+    if (used >= limit) {
+      await reply(`That's your ${limit} pictures for today. It resets at 00:00 UTC.`);
+      return;
+    }
+    const totalKey = `w:img:total:${day}`;
+    if (await stateGet(totalKey, 0) >= 150) {
+      await reply("The free picture allowance is used up for today. Try again tomorrow.");
+      return;
+    }
+    try {
+      const mod = await openai3.moderations.create({ model: "omni-moderation-latest", input: prompt });
+      if (mod.results?.[0]?.flagged) {
+        await reply("I can't make that one. Try something else.");
+        return;
+      }
+    } catch (e) {
+      console.error("[imagine] moderation failed:", e);
+      await reply("I couldn't check that prompt just now. Try again in a minute.");
+      return;
+    }
+    try {
+      await ctx.api.sendChatAction(ctx.chat.id, "upload_photo");
+    } catch {
+    }
+    try {
+      const img = await generateCfImage(prompt);
+      await stateSet(usedKey, used + 1, 36 * 60 * 60);
+      await stateIncr(totalKey, 36 * 60 * 60);
+      const who = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || "you";
+      await ctx.api.sendPhoto(ctx.chat.id, new InputFile(img, "imagine.jpg"), { caption: `For ${who}: ${prompt}`.slice(0, 900) + `
+(${limit - used - 1} left today)`, reply_parameters: { message_id: m.message_id } });
+    } catch (e) {
+      console.error("[imagine] failed:", e);
+      await reply("The picture didn't come out. It did not count against your limit. Try again.");
+    }
+  });
   bot.command("roast", async (ctx) => {
     if (!ctx.from || !ctx.chat) return;
     if (ctx.chat.type === "private") {

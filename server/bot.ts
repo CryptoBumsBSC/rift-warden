@@ -5,6 +5,7 @@ import { registerBotApi, activateCommunity, deactivateCommunity, makeComplimenta
 import { type Community as CommunityDbRow, communityProfiles, memberScores, userMemory, moderationStats, userModerationStatus, chatModerationSettings, qaCache, trustScores, banEvents, newUserMessages, violationLogs, chatFeatureSettings, communities, globalBans } from "@shared/schema";
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { generateImageBuffer } from "./imageGen";
+import { generateCfImage, cfImageReady } from "./cfImage";
 import * as RiftLore from "./riftLore";
 import { parseQuick, parseEvent as parseMeeting, resolveZone, formatIn, lineFor, zoneName } from "./timeconvert";
 import { stateGet, stateSet, stateDel, stateUpdate, stateIncr, stateScan, KEYS, TTL } from "./state";
@@ -5422,6 +5423,7 @@ export function createBot(): Bot<MyContext> {
     { command: "timeconvert", description: "Meeting time in other time zones" },
     { command: "mytimezone", description: "Save your city for meeting times" },
     { command: "roast", description: "Roasts: how to ask the Warden to roast you" },
+    { command: "imagine", description: "Make a picture (owner, TreeFitty, admins)" },
     { command: "faq", description: "Common questions answered" },
     { command: "report", description: "Report a message to the admins" },
     { command: "enter", description: "Enter the active giveaway" },
@@ -5470,7 +5472,7 @@ export function createBot(): Bot<MyContext> {
 
       const text = (ctx.message?.text || "").trim();
       // Commands always available regardless of tier
-      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
+      const FREE_COMMANDS = ["/help", "/start", "/info", "/ask", "/radio", "/games", "/rules", "/faq", "/report", "/log", "/schedule", "/schedules", "/unschedule", "/holder", "/unholder", "/holders", "/lockdown", "/unlock", "/wildlife", "/wildlifeauto", "/protect", "/unprotect", "/protected", "/protectname", "/unprotectname", "/projectprotect", "/event", "/eventoff", "/banword", "/unbanword", "/slur", "/unslur", "/shareprotected", "/cleanchat", "/roast", "/noroast", "/imagine", "/timeconvert", "/mytimezone", "/words", "/addword", "/removeword", "/setup", "/community", "/settings"];
 
       if (text.startsWith("/")) {
         const cmdBase = text.split(/[\s@]/)[0].toLowerCase();
@@ -7768,6 +7770,44 @@ They cannot gain trust points until unfrozen with /trustunfreeze.`);
       await stateSet(key, messageId, 60 * 24 * 60 * 60);
     } catch { try { await ctx.api.sendMessage(ctx.from.id, "I posted the meeting but could not pin it. Please give me the 'Pin messages' admin right in the group."); } catch {} }
   }
+
+  // /imagine: owner and TreeFitty 20 a day each, admins 3 a day each. Free (Cloudflare). Counts reset at 00:00 UTC.
+  bot.command("imagine", async (ctx) => {
+    if (!ctx.from || !ctx.chat || !ctx.message) return;
+    const m = ctx.message;
+    const reply = (t: string) => ctx.reply(t, { reply_parameters: { message_id: m.message_id } });
+    const boss = isAnnouncer(ctx.from);
+    const admin = boss || (ctx.chat.type !== "private" && await isUserAdmin(ctx, ctx.from.id));
+    if (!admin) { await reply("/imagine is for the owner, TreeFitty and group admins."); return; }
+    const limit = boss ? 20 : 3;
+    const day = new Date().toISOString().slice(0, 10);
+    const usedKey = `w:img:${ctx.from.id}:${day}`;
+    const used = await stateGet<number>(usedKey, 0);
+    const prompt = (ctx.match || "").toString().trim();
+    if (!prompt) {
+      await reply(`Imagine - how to use it\n\n/imagine a thunder bird flying over Hobart at sunrise\n/imagine pixel art koala wearing a crown\n\nWrite what you want to see. Short and clear works best.\nYou have ${Math.max(0, limit - used)} of ${limit} pictures left today. It resets at 00:00 UTC.`);
+      return;
+    }
+    if (!cfImageReady()) { await reply("Pictures are not switched on yet (the Cloudflare settings are missing)."); return; }
+    if (used >= limit) { await reply(`That's your ${limit} pictures for today. It resets at 00:00 UTC.`); return; }
+    const totalKey = `w:img:total:${day}`;
+    if ((await stateGet<number>(totalKey, 0)) >= 150) { await reply("The free picture allowance is used up for today. Try again tomorrow."); return; }
+    try {
+      const mod = await openai.moderations.create({ model: "omni-moderation-latest", input: prompt });
+      if (mod.results?.[0]?.flagged) { await reply("I can't make that one. Try something else."); return; }
+    } catch (e) { console.error("[imagine] moderation failed:", e); await reply("I couldn't check that prompt just now. Try again in a minute."); return; }
+    try { await ctx.api.sendChatAction(ctx.chat.id, "upload_photo"); } catch {}
+    try {
+      const img = await generateCfImage(prompt);
+      await stateSet(usedKey, used + 1, 36 * 60 * 60);
+      await stateIncr(totalKey, 36 * 60 * 60);
+      const who = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "you");
+      await ctx.api.sendPhoto(ctx.chat.id, new InputFile(img, "imagine.jpg"), { caption: `For ${who}: ${prompt}`.slice(0, 900) + `\n(${limit - used - 1} left today)`, reply_parameters: { message_id: m.message_id } });
+    } catch (e) {
+      console.error("[imagine] failed:", e);
+      await reply("The picture didn't come out. It did not count against your limit. Try again.");
+    }
+  });
 
   bot.command("roast", async (ctx) => {
     if (!ctx.from || !ctx.chat) return;
