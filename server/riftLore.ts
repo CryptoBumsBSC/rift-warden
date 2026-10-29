@@ -17,7 +17,11 @@ export const PROJECT_INFO = `Boomerverse
 An Australian collectible universe where bush legend, wildlife, relics and
 strange new worlds collide.
 
-First collection — Boomerverse: Genesis
+First collection — TheRiftBorn (official name: Rift Born — Boomerverse: Genesis 333)
+- TheRiftBorn is the first NFT collection of Boomerverse. Boomerverse is the universe; TheRiftBorn is its founding collection.
+- Also called Rift Born, The Rift Born, Genesis 333 or Boomerverse: Genesis. They are all the same collection.
+- X (Twitter): @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs
+- Collection page: aussieboomer.com/The-Rift-Born-Collection/
 - Code: BVGEN
 - Supply: 333 unique pieces
 - Chain: Base

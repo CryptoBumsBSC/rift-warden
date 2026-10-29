@@ -2968,6 +2968,8 @@ function detectConversationalTrigger(text: string): { triggered: boolean; respon
   if (isExactOrStart([
     "what is this", "what is boomerverse", "whats boomerverse", "what's boomerverse",
     "tell me about boomerverse", "about", "info",
+    "what is theriftborn", "what is the rift born", "what is rift born", "what is riftborn",
+    "tell me about theriftborn", "tell me about the rift born", "tell me about rift born", "theriftborn",
   ])) {
     return {
       triggered: true,
@@ -3256,6 +3258,8 @@ const TRIVIA_QUESTIONS: TriviaQuestion[] = [
   { question: "What does 'translocation' mean in conservation?", options: ["Tracking with collars", "Moving animals to a new site", "Counting a population", "Fencing a reserve"], correctIndex: 1, category: 'wildlife', points: 20 },
 
   // === BOOMERVERSE — confirmed canon only ===
+  { question: "What is TheRiftBorn?", options: ["A token", "The first NFT collection of Boomerverse", "A game console", "A chat group rule"], correctIndex: 1, category: 'boomerverse', points: 10 },
+  { question: "What is the X (Twitter) handle for TheRiftBorn?", options: ["@RiftWardenBot", "@TheRiftBorn", "@Boomerverse333", "@BVGEN"], correctIndex: 1, category: 'boomerverse', points: 10 },
   { question: "How many pieces are in Boomerverse: Genesis?", options: ["111", "222", "333", "1,000"], correctIndex: 2, category: 'boomerverse', points: 10 },
   { question: "What is the collection code for Boomerverse: Genesis?", options: ["BVG", "BVGEN", "GEN333", "BOOM"], correctIndex: 1, category: 'boomerverse', points: 10 },
   { question: "Which chain is Boomerverse: Genesis on?", options: ["Ethereum", "Solana", "Base", "Polygon"], correctIndex: 2, category: 'boomerverse', points: 10 },
@@ -3336,7 +3340,9 @@ Boomerverse — an Australian collectible universe where bush legend, wildlife,
 relics and strange new worlds collide.
 
 Confirmed facts only:
-- Boomerverse: Genesis, code BVGEN, 333 pieces, Base chain, ERC-721
+- TheRiftBorn is the first NFT collection of Boomerverse (official name: Rift Born — Boomerverse: Genesis 333). Boomerverse is the universe, TheRiftBorn is its founding collection. Also called Rift Born, The Rift Born, Genesis 333 and Boomerverse: Genesis (all the same collection).
+- TheRiftBorn on X: @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs. Collection page: aussieboomer.com/The-Rift-Born-Collection/
+- TheRiftBorn (code BVGEN), 333 pieces, Base chain, ERC-721
 - Mint price 0.021 ETH; creator royalty fixed at 5%
 - Rarity: Common 166, Uncommon 83, Rare 42, Epic 24, Legendary 12, Mythic 5, Relic Tier 1
 - Structure: 10 species families, 12 classes, 7 Rift Energy states, 19 named regions
@@ -4958,7 +4964,7 @@ async function holdProtectedHarassment(ctx: MyContext, text: string, messageId: 
 const PROJPROT_KEY = (chatId: number | string) => `w:projprot:${chatId}`;
 const PROJWORDS_KEY = (chatId: number | string) => `w:projwords:${chatId}`;
 const PROJACCUSE_KEY = (chatId: number | string, uid: number | string) => `w:projaccuse:${chatId}:${uid}`;
-const PROJECT_NAMES_DEFAULT = ["boomerverse", "bvgen", "boomerverse genesis", "rift warden", "rift roll"];
+const PROJECT_NAMES_DEFAULT = ["boomerverse", "bvgen", "boomerverse genesis", "theriftborn", "the rift born", "rift born", "riftborn", "rift warden", "rift roll"];
 const PHOMO: Record<string, string> = { "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ѕ": "s", "ј": "j", "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "$": "s", "@": "a", "!": "i" };
 function projNorm(t: string): string {
   return t.normalize("NFKD").replace(/[\u0300-\u036f\u200b-\u200f\u2060\ufeff]/g, "").toLowerCase().replace(/[^\s]/g, ch => PHOMO[ch] ?? ch);
@@ -5415,7 +5421,7 @@ export function createBot(): Bot<MyContext> {
     { command: "info", description: "About Boomerverse" },
     { command: "ask", description: "Ask about the project" },
     { command: "fact", description: "Something worth knowing" },
-    { command: "characters", description: "The locked Genesis pieces" },
+    { command: "characters", description: "The locked TheRiftBorn pieces" },
     { command: "legal", description: "Legal disclaimers" },
     { command: "safety", description: "Scam and safety reminders" },
     { command: "radio", description: "Open Rift Radio" },
@@ -5541,7 +5547,8 @@ export function createBot(): Bot<MyContext> {
   bot.command("faq", async (ctx) => {
     await ctx.reply(
       "FAQ\n\n" +
-      "What is Boomerverse? An Australian collectible universe on Base. Genesis is 333 pieces. /info has the full story.\n\n" +
+      "What is Boomerverse? An Australian collectible universe on Base. Its first collection is TheRiftBorn (Genesis 333, code BVGEN). /info has the full story.\n\n" +
+      "What is TheRiftBorn? The first NFT collection of Boomerverse: 333 pieces on Base. Also called Rift Born or Genesis 333. Follow @TheRiftBorn on X. Collection page: aussieboomer.com/The-Rift-Born-Collection/\n\n" +
       "Is there a token? No. Ignore every presale, airdrop and \"claim\" offer.\n\n" +
       "Why was my message deleted? Links, addresses, ads and a few words are restricted. /rules lists them.\n\n" +
       "How do I become trusted? Stay 7 days, write at least 5 real messages and keep a clean record. An admin can also trust you.\n\n" +
@@ -5602,7 +5609,7 @@ These are collectibles and original art. Nothing here is an investment.`;
 
   // /characters - Character list
   bot.command("characters", async (ctx) => {
-    const charText = `HARD-LOCKED GENESIS PIECES
+    const charText = `HARD-LOCKED THERIFTBORN PIECES (Genesis 333)
 
 ${CHARACTERS.map(c => `${c.name}\n${c.desc}`).join("\n\n")}
 
@@ -6162,7 +6169,7 @@ _I learn from what works. Use the +1/-1 buttons and I'll get better at this._`,
       `/ask [question] — Ask me anything about the collection\n` +
       `/info — Project info\n` +
       `/fact — Something worth knowing\n` +
-      `/characters — The locked Genesis pieces\n` +
+      `/characters — The locked TheRiftBorn pieces\n` +
       `/safety — How not to get robbed\n` +
       `/radio — Open Rift Radio\n` +
       `/games — Play the Boomerverse arcade\n` +

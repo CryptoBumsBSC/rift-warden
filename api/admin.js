@@ -497,7 +497,11 @@ var PROJECT_INFO = `Boomerverse
 An Australian collectible universe where bush legend, wildlife, relics and
 strange new worlds collide.
 
-First collection \u2014 Boomerverse: Genesis
+First collection \u2014 TheRiftBorn (official name: Rift Born \u2014 Boomerverse: Genesis 333)
+- TheRiftBorn is the first NFT collection of Boomerverse. Boomerverse is the universe; TheRiftBorn is its founding collection.
+- Also called Rift Born, The Rift Born, Genesis 333 or Boomerverse: Genesis. They are all the same collection.
+- X (Twitter): @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs
+- Collection page: aussieboomer.com/The-Rift-Born-Collection/
 - Code: BVGEN
 - Supply: 333 unique pieces
 - Chain: Base
@@ -755,7 +759,9 @@ Boomerverse \u2014 an Australian collectible universe where bush legend, wildlif
 relics and strange new worlds collide.
 
 Confirmed facts only:
-- Boomerverse: Genesis, code BVGEN, 333 pieces, Base chain, ERC-721
+- TheRiftBorn is the first NFT collection of Boomerverse (official name: Rift Born \u2014 Boomerverse: Genesis 333). Boomerverse is the universe, TheRiftBorn is its founding collection. Also called Rift Born, The Rift Born, Genesis 333 and Boomerverse: Genesis (all the same collection).
+- TheRiftBorn on X: @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs. Collection page: aussieboomer.com/The-Rift-Born-Collection/
+- TheRiftBorn (code BVGEN), 333 pieces, Base chain, ERC-721
 - Mint price 0.021 ETH; creator royalty fixed at 5%
 - Rarity: Common 166, Uncommon 83, Rare 42, Epic 24, Legendary 12, Mythic 5, Relic Tier 1
 - Structure: 10 species families, 12 classes, 7 Rift Energy states, 19 named regions

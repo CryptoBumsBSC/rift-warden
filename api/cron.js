@@ -597,7 +597,11 @@ var PROJECT_INFO = `Boomerverse
 An Australian collectible universe where bush legend, wildlife, relics and
 strange new worlds collide.
 
-First collection \u2014 Boomerverse: Genesis
+First collection \u2014 TheRiftBorn (official name: Rift Born \u2014 Boomerverse: Genesis 333)
+- TheRiftBorn is the first NFT collection of Boomerverse. Boomerverse is the universe; TheRiftBorn is its founding collection.
+- Also called Rift Born, The Rift Born, Genesis 333 or Boomerverse: Genesis. They are all the same collection.
+- X (Twitter): @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs
+- Collection page: aussieboomer.com/The-Rift-Born-Collection/
 - Code: BVGEN
 - Supply: 333 unique pieces
 - Chain: Base
@@ -4249,7 +4253,15 @@ function detectConversationalTrigger(text2) {
     "what's boomerverse",
     "tell me about boomerverse",
     "about",
-    "info"
+    "info",
+    "what is theriftborn",
+    "what is the rift born",
+    "what is rift born",
+    "what is riftborn",
+    "tell me about theriftborn",
+    "tell me about the rift born",
+    "tell me about rift born",
+    "theriftborn"
   ])) {
     return {
       triggered: true,
@@ -4465,6 +4477,8 @@ var TRIVIA_QUESTIONS = [
   { question: "What is a 'tarn'?", options: ["A coastal inlet", "A small mountain lake", "A dry riverbed", "A rock shelter"], correctIndex: 1, category: "wildlife", points: 15 },
   { question: "What does 'translocation' mean in conservation?", options: ["Tracking with collars", "Moving animals to a new site", "Counting a population", "Fencing a reserve"], correctIndex: 1, category: "wildlife", points: 20 },
   // === BOOMERVERSE — confirmed canon only ===
+  { question: "What is TheRiftBorn?", options: ["A token", "The first NFT collection of Boomerverse", "A game console", "A chat group rule"], correctIndex: 1, category: "boomerverse", points: 10 },
+  { question: "What is the X (Twitter) handle for TheRiftBorn?", options: ["@RiftWardenBot", "@TheRiftBorn", "@Boomerverse333", "@BVGEN"], correctIndex: 1, category: "boomerverse", points: 10 },
   { question: "How many pieces are in Boomerverse: Genesis?", options: ["111", "222", "333", "1,000"], correctIndex: 2, category: "boomerverse", points: 10 },
   { question: "What is the collection code for Boomerverse: Genesis?", options: ["BVG", "BVGEN", "GEN333", "BOOM"], correctIndex: 1, category: "boomerverse", points: 10 },
   { question: "Which chain is Boomerverse: Genesis on?", options: ["Ethereum", "Solana", "Base", "Polygon"], correctIndex: 2, category: "boomerverse", points: 10 },
@@ -4516,7 +4530,9 @@ Boomerverse \u2014 an Australian collectible universe where bush legend, wildlif
 relics and strange new worlds collide.
 
 Confirmed facts only:
-- Boomerverse: Genesis, code BVGEN, 333 pieces, Base chain, ERC-721
+- TheRiftBorn is the first NFT collection of Boomerverse (official name: Rift Born \u2014 Boomerverse: Genesis 333). Boomerverse is the universe, TheRiftBorn is its founding collection. Also called Rift Born, The Rift Born, Genesis 333 and Boomerverse: Genesis (all the same collection).
+- TheRiftBorn on X: @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs. Collection page: aussieboomer.com/The-Rift-Born-Collection/
+- TheRiftBorn (code BVGEN), 333 pieces, Base chain, ERC-721
 - Mint price 0.021 ETH; creator royalty fixed at 5%
 - Rarity: Common 166, Uncommon 83, Rare 42, Epic 24, Legendary 12, Mythic 5, Relic Tier 1
 - Structure: 10 species families, 12 classes, 7 Rift Energy states, 19 named regions
@@ -5971,7 +5987,7 @@ Message: ${text2.slice(0, 300)}`);
 var PROJPROT_KEY = (chatId) => `w:projprot:${chatId}`;
 var PROJWORDS_KEY = (chatId) => `w:projwords:${chatId}`;
 var PROJACCUSE_KEY = (chatId, uid) => `w:projaccuse:${chatId}:${uid}`;
-var PROJECT_NAMES_DEFAULT = ["boomerverse", "bvgen", "boomerverse genesis", "rift warden", "rift roll"];
+var PROJECT_NAMES_DEFAULT = ["boomerverse", "bvgen", "boomerverse genesis", "theriftborn", "the rift born", "rift born", "riftborn", "rift warden", "rift roll"];
 var PHOMO = { "\u0430": "a", "\u0435": "e", "\u043E": "o", "\u0440": "p", "\u0441": "c", "\u0443": "y", "\u0445": "x", "\u0456": "i", "\u0455": "s", "\u0458": "j", "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "$": "s", "@": "a", "!": "i" };
 function projNorm(t) {
   return t.normalize("NFKD").replace(/[\u0300-\u036f\u200b-\u200f\u2060\ufeff]/g, "").toLowerCase().replace(/[^\s]/g, (ch) => PHOMO[ch] ?? ch);
@@ -6476,7 +6492,7 @@ function createBot() {
     { command: "info", description: "About Boomerverse" },
     { command: "ask", description: "Ask about the project" },
     { command: "fact", description: "Something worth knowing" },
-    { command: "characters", description: "The locked Genesis pieces" },
+    { command: "characters", description: "The locked TheRiftBorn pieces" },
     { command: "legal", description: "Legal disclaimers" },
     { command: "safety", description: "Scam and safety reminders" },
     { command: "radio", description: "Open Rift Radio" },
@@ -6557,7 +6573,7 @@ function createBot() {
   });
   bot.command("faq", async (ctx) => {
     await ctx.reply(
-      'FAQ\n\nWhat is Boomerverse? An Australian collectible universe on Base. Genesis is 333 pieces. /info has the full story.\n\nIs there a token? No. Ignore every presale, airdrop and "claim" offer.\n\nWhy was my message deleted? Links, addresses, ads and a few words are restricted. /rules lists them.\n\nHow do I become trusted? Stay 7 days, write at least 5 real messages and keep a clean record. An admin can also trust you.\n\nHow do I report something? Reply to the message and send /report.\n\nWhere are the official links? In the pinned messages only.\n\nWhat else can I do here? /radio for music, /games for the arcade, or tag me and ask.'
+      'FAQ\n\nWhat is Boomerverse? An Australian collectible universe on Base. Its first collection is TheRiftBorn (Genesis 333, code BVGEN). /info has the full story.\n\nWhat is TheRiftBorn? The first NFT collection of Boomerverse: 333 pieces on Base. Also called Rift Born or Genesis 333. Follow @TheRiftBorn on X. Collection page: aussieboomer.com/The-Rift-Born-Collection/\n\nIs there a token? No. Ignore every presale, airdrop and "claim" offer.\n\nWhy was my message deleted? Links, addresses, ads and a few words are restricted. /rules lists them.\n\nHow do I become trusted? Stay 7 days, write at least 5 real messages and keep a clean record. An admin can also trust you.\n\nHow do I report something? Reply to the message and send /report.\n\nWhere are the official links? In the pinned messages only.\n\nWhat else can I do here? /radio for music, /games for the arcade, or tag me and ask.'
     );
   });
   const sendGames = async (ctx) => {
@@ -6599,7 +6615,7 @@ These are collectibles and original art. Nothing here is an investment.`;
     await ctx.reply(legalText);
   });
   bot.command("characters", async (ctx) => {
-    const charText = `HARD-LOCKED GENESIS PIECES
+    const charText = `HARD-LOCKED THERIFTBORN PIECES (Genesis 333)
 
 ${CHARACTERS.map((c) => `${c.name}
 ${c.desc}`).join("\n\n")}
@@ -7085,7 +7101,7 @@ Use /settings to see all toggles.`);
 /ask [question] \u2014 Ask me anything about the collection
 /info \u2014 Project info
 /fact \u2014 Something worth knowing
-/characters \u2014 The locked Genesis pieces
+/characters \u2014 The locked TheRiftBorn pieces
 /safety \u2014 How not to get robbed
 /radio \u2014 Open Rift Radio
 /games \u2014 Play the Boomerverse arcade
