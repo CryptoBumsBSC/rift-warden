@@ -1248,7 +1248,7 @@ const ALLOWED_DOMAINS = [
     ...(process.env.OFFICIAL_DOMAINS || "").split(",").map(d => d.trim()).filter(Boolean),
     "t.me",
   ])),
-  "opensea.io", "base.org", "basescan.org", "etherscan.io",
+  "opensea.io", "base.org", "basescan.org", "etherscan.io", "aussieboomer.com",
 ];
 
 // High-risk phrases that increase risk score
@@ -3341,7 +3341,7 @@ relics and strange new worlds collide.
 
 Confirmed facts only:
 - TheRiftBorn is the first NFT collection of Boomerverse (official name: Rift Born — Boomerverse: Genesis 333). Boomerverse is the universe, TheRiftBorn is its founding collection. Also called Rift Born, The Rift Born, Genesis 333 and Boomerverse: Genesis (all the same collection).
-- TheRiftBorn on X: @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs. Collection page: aussieboomer.com/The-Rift-Born-Collection/
+- TheRiftBorn on X: @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs. Official home for all NFT info: https://aussieboomer.com/The-Rift-Born-Collection/ (everything about the NFTs is listed there as it is confirmed; send people there)
 - TheRiftBorn (code BVGEN), 333 pieces, Base chain, ERC-721
 - Mint price 0.021 ETH; creator royalty fixed at 5%
 - Rarity: Common 166, Uncommon 83, Rare 42, Epic 24, Legendary 12, Mythic 5, Relic Tier 1
@@ -5548,7 +5548,7 @@ export function createBot(): Bot<MyContext> {
     await ctx.reply(
       "FAQ\n\n" +
       "What is Boomerverse? An Australian collectible universe on Base. Its first collection is TheRiftBorn (Genesis 333, code BVGEN). /info has the full story.\n\n" +
-      "What is TheRiftBorn? The first NFT collection of Boomerverse: 333 pieces on Base. Also called Rift Born or Genesis 333. Follow @TheRiftBorn on X. Collection page: aussieboomer.com/The-Rift-Born-Collection/\n\n" +
+      "What is TheRiftBorn? The first NFT collection of Boomerverse: 333 pieces on Base. Also called Rift Born or Genesis 333. Follow @TheRiftBorn on X. All the NFT info is listed here: https://aussieboomer.com/The-Rift-Born-Collection/\n\n" +
       "Is there a token? No. Ignore every presale, airdrop and \"claim\" offer.\n\n" +
       "Why was my message deleted? Links, addresses, ads and a few words are restricted. /rules lists them.\n\n" +
       "How do I become trusted? Stay 7 days, write at least 5 real messages and keep a clean record. An admin can also trust you.\n\n" +
@@ -5613,7 +5613,9 @@ These are collectibles and original art. Nothing here is an investment.`;
 
 ${CHARACTERS.map(c => `${c.name}\n${c.desc}`).join("\n\n")}
 
-Everything else in the 333 is provisional. I won't describe a piece before it's locked — that would make canon by accident.`;
+Everything else in the 333 is provisional. I won't describe a piece before it's locked — that would make canon by accident.
+
+All the NFT info: https://aussieboomer.com/The-Rift-Born-Collection/`;
     await ctx.reply(charText);
   });
 

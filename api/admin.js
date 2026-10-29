@@ -501,7 +501,7 @@ First collection \u2014 TheRiftBorn (official name: Rift Born \u2014 Boomerverse
 - TheRiftBorn is the first NFT collection of Boomerverse. Boomerverse is the universe; TheRiftBorn is its founding collection.
 - Also called Rift Born, The Rift Born, Genesis 333 or Boomerverse: Genesis. They are all the same collection.
 - X (Twitter): @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs
-- Collection page: aussieboomer.com/The-Rift-Born-Collection/
+- Official home for all NFT info: https://aussieboomer.com/The-Rift-Born-Collection/ . Everything about the NFTs is listed and added there as it is confirmed. Send people there, and if it is not on that page, say it is not confirmed yet.
 - Code: BVGEN
 - Supply: 333 unique pieces
 - Chain: Base
@@ -702,7 +702,8 @@ var ALLOWED_DOMAINS = [
   "opensea.io",
   "base.org",
   "basescan.org",
-  "etherscan.io"
+  "etherscan.io",
+  "aussieboomer.com"
 ];
 async function cleanupOldTrackedMessages() {
   try {
@@ -760,7 +761,7 @@ relics and strange new worlds collide.
 
 Confirmed facts only:
 - TheRiftBorn is the first NFT collection of Boomerverse (official name: Rift Born \u2014 Boomerverse: Genesis 333). Boomerverse is the universe, TheRiftBorn is its founding collection. Also called Rift Born, The Rift Born, Genesis 333 and Boomerverse: Genesis (all the same collection).
-- TheRiftBorn on X: @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs. Collection page: aussieboomer.com/The-Rift-Born-Collection/
+- TheRiftBorn on X: @TheRiftBorn. Hashtags: #TheRiftBorn #InvestingInSurvival #DigiNFTs. Official home for all NFT info: https://aussieboomer.com/The-Rift-Born-Collection/ (everything about the NFTs is listed there as it is confirmed; send people there)
 - TheRiftBorn (code BVGEN), 333 pieces, Base chain, ERC-721
 - Mint price 0.021 ETH; creator royalty fixed at 5%
 - Rarity: Common 166, Uncommon 83, Rare 42, Epic 24, Legendary 12, Mythic 5, Relic Tier 1
