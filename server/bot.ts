@@ -34,7 +34,7 @@ const OFFICIAL_CONTRACT_ADDRESSES = new Set(
 const OWNER_CONTACT_USERNAME = (process.env.OWNER_CONTACT_USERNAME || "").replace(/^@/, "").trim();
 const OWNER_CONTACT = OWNER_CONTACT_USERNAME ? `@${OWNER_CONTACT_USERNAME}` : "the project owner";
 const OFFICIAL_WEBSITE_URL = (process.env.OFFICIAL_WEBSITE_URL || "").trim();
-const OFFICIAL_TELEGRAM_URL = (process.env.OFFICIAL_TELEGRAM_URL || "").trim();
+const OFFICIAL_TELEGRAM_URL = (process.env.OFFICIAL_TELEGRAM_URL || "https://t.me/TheRiftBorn").trim();
 const PUBLIC_URL = (process.env.PUBLIC_URL || "").trim().replace(/\/+$/, "");
 const RIFT_RADIO_URL = (process.env.RIFT_RADIO_URL || (PUBLIC_URL ? `${PUBLIC_URL}/rift-radio.html` : "")).trim();
 const COMMUNITY_TIMEZONE = (process.env.COMMUNITY_TIMEZONE || "Australia/Hobart").trim();
@@ -3341,6 +3341,7 @@ relics and strange new worlds collide.
 
 Confirmed facts only:
 - TheRiftBorn is the first NFT collection of Boomerverse (official name: Rift Born — Boomerverse: Genesis 333). Boomerverse is the universe, TheRiftBorn is its founding collection. Also called Rift Born, The Rift Born, Genesis 333 and Boomerverse: Genesis (all the same collection).
+- Official Telegram: https://t.me/TheRiftBorn
 - TheRiftBorn on X: @TheRiftBorn and @TheRiftNFTs. Hashtags: #TheRiftBorn #TheRiftNFTs #InvestingInSurvival #DigiNFTs. Official home for all NFT info: https://aussieboomer.com/The-Rift-Born-Collection/ (everything about the NFTs is listed there as it is confirmed; send people there)
 - TheRiftBorn (code BVGEN), 333 pieces, Base chain, ERC-721
 - Mint price 0.021 ETH; creator royalty fixed at 5%
