@@ -13854,7 +13854,14 @@ Start another with /trivia`
 async function checkMyPermissions(bot, chatId) {
   const missing = [];
   try {
-    const me = await bot.api.getChatMember(chatId, bot.botInfo.id);
+    let myId;
+    try {
+      myId = bot.botInfo?.id;
+    } catch {
+      myId = void 0;
+    }
+    if (!myId) myId = (await bot.api.getMe()).id;
+    const me = await bot.api.getChatMember(chatId, myId);
     if (me.status !== "administrator") {
       return ["ADMIN \u2014 I am not an admin here. Almost nothing will work."];
     }
@@ -13862,7 +13869,8 @@ async function checkMyPermissions(bot, chatId) {
     if (!p.can_delete_messages) missing.push("Delete messages \u2014 can't remove scam links or spam");
     if (!p.can_restrict_members) missing.push("Ban users \u2014 can't mute, ban, or enforce the Boss/TreeFitty extra-bot rule");
     if (!p.can_invite_users) missing.push("Invite users \u2014 CAPTCHA unrestrict may fail");
-  } catch {
+  } catch (e) {
+    console.error("[perm-check] failed", chatId, e?.message);
     missing.push("UNKNOWN \u2014 couldn't read my own permissions in this chat");
   }
   return missing;

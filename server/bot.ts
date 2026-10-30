@@ -12906,7 +12906,10 @@ async function expireStaleGames(bot: Bot<MyContext>, chatId: number): Promise<vo
 async function checkMyPermissions(bot: Bot<MyContext>, chatId: number): Promise<string[]> {
   const missing: string[] = [];
   try {
-    const me = await bot.api.getChatMember(chatId, bot.botInfo.id);
+    let myId: number | undefined;
+    try { myId = bot.botInfo?.id; } catch { myId = undefined; }
+    if (!myId) myId = (await bot.api.getMe()).id;
+    const me = await bot.api.getChatMember(chatId, myId);
     if (me.status !== "administrator") {
       return ["ADMIN — I am not an admin here. Almost nothing will work."];
     }
@@ -12914,7 +12917,8 @@ async function checkMyPermissions(bot: Bot<MyContext>, chatId: number): Promise<
     if (!p.can_delete_messages) missing.push("Delete messages — can't remove scam links or spam");
     if (!p.can_restrict_members) missing.push("Ban users — can't mute, ban, or enforce the Boss/TreeFitty extra-bot rule");
     if (!p.can_invite_users) missing.push("Invite users — CAPTCHA unrestrict may fail");
-  } catch {
+  } catch (e) {
+    console.error("[perm-check] failed", chatId, (e as Error)?.message);
     missing.push("UNKNOWN — couldn't read my own permissions in this chat");
   }
   return missing;
