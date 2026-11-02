@@ -2234,6 +2234,27 @@ async function ensureCommunity(chatId, displayName) {
   communityCache.set(chatId, community);
   return community;
 }
+async function autoFreeForOwner(api, chatIdStr, community, speaker) {
+  if (community.status === "banned" || community.status === "complimentary" || community.status === "active") return false;
+  let mine = isAnnouncer(speaker);
+  if (!mine) {
+    const key = `w:ownfree:${chatIdStr}`;
+    if (await stateGet(key, 0)) return false;
+    await stateSet(key, 1, 60 * 60);
+    try {
+      const ids = [GLOBAL_OWNER_USER_ID, TREEFITTY_USER_ID].filter(Boolean);
+      const admins = await api.getChatAdministrators(chatIdStr);
+      mine = admins.some((a) => !a.user.is_bot && (ids.includes(String(a.user.id)) || ["aussieboomer", "treefitty"].includes((a.user.username || "").toLowerCase())));
+    } catch {
+      return false;
+    }
+  }
+  if (!mine) return false;
+  await makeComplimentary(chatIdStr);
+  communityCache.delete(chatIdStr);
+  console.log("[Community] Owner group set to complimentary:", chatIdStr);
+  return true;
+}
 function isSubscribed(community) {
   if (community.status === "active") return true;
   if (community.status === "complimentary") return true;
@@ -6535,6 +6556,9 @@ function createBot() {
       community = await ensureCommunity(chatIdStr, chatTitle);
     }
     if (community.status === "banned") return;
+    if (!isSubscribed(community) && await autoFreeForOwner(ctx.api, chatIdStr, community, ctx.from).catch(() => false)) {
+      community = await getCommunity(chatIdStr) || community;
+    }
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();
@@ -13750,6 +13774,7 @@ async function checkExpiredTrials() {
       const now = /* @__PURE__ */ new Date();
       const expiredRows = await db.select().from(communities).where(sql2`status = 'trial' AND trial_expires_at IS NOT NULL AND trial_expires_at < ${now.toISOString()}`);
       for (const row of expiredRows) {
+        if (botInstance && await autoFreeForOwner(botInstance.api, row.chatId, row).catch(() => false)) continue;
         await db.update(communities).set({ status: "free", updatedAt: /* @__PURE__ */ new Date() }).where(eq2(communities.chatId, row.chatId));
         communityCache.delete(row.chatId);
         const chatIdNum = parseInt(row.chatId);
@@ -13969,6 +13994,14 @@ async function runCronTick() {
       if (r) ran.push(r);
     } catch (err) {
       console.error("[cron] event notice failed:", err);
+    }
+  }
+  for (const chatId of Array.from(activeChats)) {
+    try {
+      const c = await getCommunity(String(chatId));
+      if (c && !isSubscribed(c) && await autoFreeForOwner(bot.api, String(chatId), c)) ran.push(`owner-free:${chatId}`);
+    } catch (err) {
+      console.error("[cron] owner-free failed:", err);
     }
   }
   for (const chatId of Array.from(activeChats)) {

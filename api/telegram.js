@@ -2236,6 +2236,27 @@ async function ensureCommunity(chatId, displayName) {
   communityCache.set(chatId, community);
   return community;
 }
+async function autoFreeForOwner(api, chatIdStr, community, speaker) {
+  if (community.status === "banned" || community.status === "complimentary" || community.status === "active") return false;
+  let mine = isAnnouncer(speaker);
+  if (!mine) {
+    const key = `w:ownfree:${chatIdStr}`;
+    if (await stateGet(key, 0)) return false;
+    await stateSet(key, 1, 60 * 60);
+    try {
+      const ids = [GLOBAL_OWNER_USER_ID, TREEFITTY_USER_ID].filter(Boolean);
+      const admins = await api.getChatAdministrators(chatIdStr);
+      mine = admins.some((a) => !a.user.is_bot && (ids.includes(String(a.user.id)) || ["aussieboomer", "treefitty"].includes((a.user.username || "").toLowerCase())));
+    } catch {
+      return false;
+    }
+  }
+  if (!mine) return false;
+  await makeComplimentary(chatIdStr);
+  communityCache.delete(chatIdStr);
+  console.log("[Community] Owner group set to complimentary:", chatIdStr);
+  return true;
+}
 function isSubscribed(community) {
   if (community.status === "active") return true;
   if (community.status === "complimentary") return true;
@@ -6261,6 +6282,9 @@ function createBot() {
       community = await ensureCommunity(chatIdStr, chatTitle);
     }
     if (community.status === "banned") return;
+    if (!isSubscribed(community) && await autoFreeForOwner(ctx.api, chatIdStr, community, ctx.from).catch(() => false)) {
+      community = await getCommunity(chatIdStr) || community;
+    }
     if (!isSubscribed(community)) {
       if (isGlobalOwner(ctx)) return next();
       const text2 = (ctx.message?.text || "").trim();

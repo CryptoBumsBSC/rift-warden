@@ -486,6 +486,27 @@ async function ensureCommunity(chatId: string, displayName?: string): Promise<Co
   return community;
 }
 
+// Owner groups are always free: if the owner or TreeFitty is an admin of the group (or is the one talking), it goes Complimentary.
+async function autoFreeForOwner(api: Bot<MyContext>["api"], chatIdStr: string, community: CommunityRecord, speaker?: { id: number; username?: string }): Promise<boolean> {
+  if (community.status === "banned" || community.status === "complimentary" || community.status === "active") return false;
+  let mine = isAnnouncer(speaker);
+  if (!mine) {
+    const key = `w:ownfree:${chatIdStr}`;
+    if (await stateGet<number>(key, 0)) return false; // checked recently
+    await stateSet(key, 1, 60 * 60);
+    try {
+      const ids = [GLOBAL_OWNER_USER_ID, TREEFITTY_USER_ID].filter(Boolean);
+      const admins = await api.getChatAdministrators(chatIdStr);
+      mine = admins.some(a => !a.user.is_bot && (ids.includes(String(a.user.id)) || ["aussieboomer", "treefitty"].includes((a.user.username || "").toLowerCase())));
+    } catch { return false; }
+  }
+  if (!mine) return false;
+  await makeComplimentary(chatIdStr);
+  communityCache.delete(chatIdStr);
+  console.log("[Community] Owner group set to complimentary:", chatIdStr);
+  return true;
+}
+
 function isSubscribed(community: CommunityRecord): boolean {
   if (community.status === "active") return true;
   if (community.status === "complimentary") return true;
@@ -5474,6 +5495,9 @@ export function createBot(): Bot<MyContext> {
     if (community.status === "banned") return;
 
     // Free/expired communities: basic safety moderation + free commands only
+    if (!isSubscribed(community) && await autoFreeForOwner(ctx.api, chatIdStr, community, ctx.from).catch(() => false)) {
+      community = (await getCommunity(chatIdStr)) || community;
+    }
     if (!isSubscribed(community)) {
       // Global owner always gets through (for /activate, /makefree, etc.)
       if (isGlobalOwner(ctx)) return next();
@@ -12780,6 +12804,7 @@ export async function checkExpiredTrials(): Promise<void> {
         .where(sql`status = 'trial' AND trial_expires_at IS NOT NULL AND trial_expires_at < ${now.toISOString()}`);
 
       for (const row of expiredRows) {
+        if (botInstance && await autoFreeForOwner(botInstance.api, row.chatId, row as unknown as CommunityRecord).catch(() => false)) continue;
         await db.update(communities)
           .set({ status: "free", updatedAt: new Date() })
           .where(eq(communities.chatId, row.chatId));
@@ -13013,6 +13038,14 @@ export async function runCronTick(): Promise<{ ran: string[] }> {
       const r = await eventCronNotices(bot.api, chatId);
       if (r) ran.push(r);
     } catch (err) { console.error("[cron] event notice failed:", err); }
+  }
+
+  // Owner groups that fell to the free tier go back to Complimentary without anyone having to ask.
+  for (const chatId of Array.from(activeChats)) {
+    try {
+      const c = await getCommunity(String(chatId));
+      if (c && !isSubscribed(c) && await autoFreeForOwner(bot.api, String(chatId), c)) ran.push(`owner-free:${chatId}`);
+    } catch (err) { console.error("[cron] owner-free failed:", err); }
   }
 
   // Tell the admins if I've been given a badge but not the powers behind it.
