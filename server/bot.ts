@@ -13048,12 +13048,7 @@ export async function runCronTick(): Promise<{ ran: string[] }> {
     } catch (err) { console.error("[cron] owner-free failed:", err); }
   }
 
-  // Tell the admins if I've been given a badge but not the powers behind it.
-  for (const chatId of Array.from(activeChats)) {
-    try {
-      if (await reportMissingPermissions(bot, chatId)) ran.push(`perms-warning:${chatId}`);
-    } catch (err) { console.error("[cron] permission check failed:", err); }
-  }
+  // The "PERMISSIONS MISSING" group warning is switched off (owner request, 3 Nov 2026).
 
   // Daily
   const before = ran.length;

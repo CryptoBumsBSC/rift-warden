@@ -13876,53 +13876,6 @@ Start another with /trivia`
     }
   }
 }
-async function checkMyPermissions(bot, chatId) {
-  const missing = [];
-  try {
-    let myId;
-    try {
-      myId = bot.botInfo?.id;
-    } catch {
-      myId = void 0;
-    }
-    if (!myId) myId = (await bot.api.getMe()).id;
-    const me = await bot.api.getChatMember(chatId, myId);
-    if (me.status !== "administrator") {
-      return ["ADMIN \u2014 I am not an admin here. Almost nothing will work."];
-    }
-    const p = me;
-    if (!p.can_delete_messages) missing.push("Delete messages \u2014 can't remove scam links or spam");
-    if (!p.can_restrict_members) missing.push("Ban users \u2014 can't mute, ban, or enforce the Boss/TreeFitty extra-bot rule");
-    if (!p.can_invite_users) missing.push("Invite users \u2014 CAPTCHA unrestrict may fail");
-  } catch (e) {
-    console.error("[perm-check] failed", chatId, e?.message);
-    missing.push("UNKNOWN \u2014 couldn't read my own permissions in this chat");
-  }
-  return missing;
-}
-async function reportMissingPermissions(bot, chatId) {
-  const missing = await checkMyPermissions(bot, chatId);
-  if (missing.length === 0) return false;
-  const key = `w:permwarn:${chatId}`;
-  const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-  const last = await stateGet(key, "");
-  if (last === today) return true;
-  await stateSet(key, today, 3 * 24 * 60 * 60);
-  try {
-    await bot.api.sendMessage(
-      chatId,
-      `PERMISSIONS MISSING
-
-I don't have everything I need to protect this group:
-
-` + missing.map((m) => `- ${m}`).join("\n") + `
-
-Fix it in Group Settings \u2192 Administrators \u2192 me. Until then the protections above are not actually enforced.`
-    );
-  } catch {
-  }
-  return true;
-}
 async function sendSafetyDigest(bot) {
   if (!GLOBAL_OWNER_USER_ID) return;
   const since = new Date(Date.now() - 24 * 60 * 60 * 1e3);
@@ -14002,13 +13955,6 @@ async function runCronTick() {
       if (c && !isSubscribed(c) && await autoFreeForOwner(bot.api, String(chatId), c)) ran.push(`owner-free:${chatId}`);
     } catch (err) {
       console.error("[cron] owner-free failed:", err);
-    }
-  }
-  for (const chatId of Array.from(activeChats)) {
-    try {
-      if (await reportMissingPermissions(bot, chatId)) ran.push(`perms-warning:${chatId}`);
-    } catch (err) {
-      console.error("[cron] permission check failed:", err);
     }
   }
   const before = ran.length;
