@@ -4818,22 +4818,11 @@ If it is official, @aussieboomer or @TreeFitty can approve the source/configurat
 function memberLabel(user) {
   return user.username ? `@${user.username}` : user.first_name || "friend";
 }
-var WELCOME_SAFETY = "\n\nRead the pinned messages. The team will NEVER DM you first. There is no token. Never share your seed phrase.";
+var WELCOME_SAFETY = "\n\nStay safe: check the pinned messages. The team will NEVER DM you first. Never share your seed phrase. Type /help for commands, or ask me.";
 function buildFirstWelcome(label, botName = "The Warden") {
-  return `${label}, welcome through the Gateway. I'm ${botName} \u2014 part doorman, part record-keeper, part scammer's recurring administrative problem.
+  return `${label}, welcome to Boomerverse!
 
-Boomerverse is an Australian collectible universe built around wildlife, bush legend, relics and the Rift. Genesis is the first collection: 333 unique ERC-721 pieces on Base. The project is about original art, canon, community and long-term stewardship \u2014 not investment promises, and there is no ERC-20 token.
-
-Start here:
-\u2022 Read the pinned messages and official links first.
-\u2022 The team will NEVER DM you first. Anyone who does is a scammer.
-\u2022 Never trust a mint, contract or wallet link just because somebody sounds confident.
-\u2022 /info gives the project overview.
-\u2022 /safety gives the wallet-safety rules.
-\u2022 /radio opens Rift Radio \u2014 twelve signals for when the chat needs a soundtrack.
-\u2022 /trivia and /puzzle are there when the serious people become unbearable.
-
-Tag @${BOT_USERNAME2} or reply to me and talk normally. Once you start a conversation with me, I'll keep talking with you until you wander off. Ask about the project, collection, lore, rules, wildlife, or what is happening in the community.`;
+Stay safe: check the pinned messages. The team will NEVER DM you first. Never share your seed phrase. Type /help for commands, or just ask ${botName}.`;
 }
 async function getConversationState(chatId, userId) {
   const state = await stateGet(`w:conv:${chatId}:${userId}`, null);
@@ -10465,12 +10454,6 @@ To get a group's chatId, use /communities first.`
       const chatId = ctx.chat.id;
       const chatIdStr = chatId.toString();
       const newMemberId = member.id.toString();
-      if (!member.is_bot) {
-        try {
-          await ctx.reply(`${memberLabel(member)} \u2014 saw you come through. Welcome. I'm the Warden. Give me a moment to check the gate log; I don't leave new arrivals standing around.`);
-        } catch {
-        }
-      }
       const launchRole = staticRoleForUserId(member.id);
       const priorTrustRows = member.is_bot ? [] : await db.select().from(trustScores).where(and(eq2(trustScores.telegramUserId, newMemberId), eq2(trustScores.chatId, chatIdStr))).limit(1);
       const isFirstCommunityJoin = priorTrustRows.length === 0;
@@ -10837,7 +10820,7 @@ Tap the button below to confirm you're a real person. You have 10 minutes \u2014
       } else if (communityData?.welcomeMessage) {
         welcome = communityData.welcomeMessage.replace(/\{name\}/gi, label) + WELCOME_SAFETY;
       } else {
-        welcome = `${label}, welcome back. Gate remembers you. Ask me what changed, or tag @${BOT_USERNAME2} and carry on where you left off.${WELCOME_SAFETY}`;
+        welcome = `${label}, welcome back!${WELCOME_SAFETY}`;
       }
       await wardenReply(ctx, welcome);
     }
