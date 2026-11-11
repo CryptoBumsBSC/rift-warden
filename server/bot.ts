@@ -5594,15 +5594,16 @@ export function createBot(): Bot<MyContext> {
       ["BUSH SEARCH", "bush-search.html"],
       ["SPACE DEFENDER", "space-defender.html"],
       ["DEVIL CATCH", "devil-catch.html"],
+      ["Rift Parths", "https://aussieboomer.com/rift-paths.html"],
     ];
     const isPrivate = ctx.chat?.type === "private";
     const rows = GAMES.map(([label, file]) => [
       isPrivate
-        ? { text: label, web_app: { url: `${ARCADE}/${file}` } }
-        : { text: label, url: `${ARCADE}/${file}` },
+        ? { text: label, web_app: { url: file.startsWith("https://") ? file : `${ARCADE}/${file}` } }
+        : { text: label, url: file.startsWith("https://") ? file : `${ARCADE}/${file}` },
     ]);
     await ctx.reply(
-      "BOOMERVERSE ARCADE — SIX GAMES\n\nPick one. Scores stay on your own device. " +
+      "BOOMERVERSE ARCADE — SEVEN GAMES\n\nPick one. Scores stay on your own device. " +
         (isPrivate ? "" : "Open this in a private chat with me to play inside Telegram."),
       { reply_markup: { inline_keyboard: rows } }
     );
