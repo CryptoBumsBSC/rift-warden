@@ -5588,13 +5588,13 @@ export function createBot(): Bot<MyContext> {
   const sendGames = async (ctx: MyContext) => {
     const ARCADE = "https://boomerverse-adzz.vercel.app";
     const GAMES: Array<[string, string]> = [
-      ["RIFT CRITTERS", "rift-critters.html"],
-      ["RIFT RUN", "rift-runner.html"],
-      ["RIFT MAZE", "rift-maze.html"],
-      ["BUSH SEARCH", "bush-search.html"],
-      ["SPACE DEFENDER", "space-defender.html"],
-      ["DEVIL CATCH", "devil-catch.html"],
-      ["Rift Parths", "https://aussieboomer.com/rift-paths.html"],
+      ["RIFT CRITTERS", "games/rift-critters"],
+      ["RIFT RUN", "games/rift-run"],
+      ["RIFT MAZE", "games/rift-maze"],
+      ["BUSH SEARCH", "games/bush-search"],
+      ["SPACE DEFENDER", "games/space-defender"],
+      ["DEVIL CATCH", "games/devil-catch"],
+      ["Rift Parths", "https://aussieboomer.com/games/rift-parths"],
     ];
     const isPrivate = ctx.chat?.type === "private";
     const rows = GAMES.map(([label, file]) => [
