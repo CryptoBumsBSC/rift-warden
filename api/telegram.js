@@ -6321,19 +6321,20 @@ function createBot() {
   const sendGames = async (ctx) => {
     const ARCADE = "https://boomerverse-adzz.vercel.app";
     const GAMES = [
-      ["RIFT CRITTERS", "rift-critters.html"],
-      ["RIFT RUN", "rift-runner.html"],
-      ["RIFT MAZE", "rift-maze.html"],
-      ["BUSH SEARCH", "bush-search.html"],
-      ["SPACE DEFENDER", "space-defender.html"],
-      ["DEVIL CATCH", "devil-catch.html"]
+      ["RIFT CRITTERS", "games/rift-critters"],
+      ["RIFT RUN", "games/rift-run"],
+      ["RIFT MAZE", "games/rift-maze"],
+      ["BUSH SEARCH", "games/bush-search"],
+      ["SPACE DEFENDER", "games/space-defender"],
+      ["DEVIL CATCH", "games/devil-catch"],
+      ["Rift Parths", "https://aussieboomer.com/games/rift-parths"]
     ];
     const isPrivate = ctx.chat?.type === "private";
     const rows = GAMES.map(([label, file]) => [
-      isPrivate ? { text: label, web_app: { url: `${ARCADE}/${file}` } } : { text: label, url: `${ARCADE}/${file}` }
+      isPrivate ? { text: label, web_app: { url: file.startsWith("https://") ? file : `${ARCADE}/${file}` } } : { text: label, url: file.startsWith("https://") ? file : `${ARCADE}/${file}` }
     ]);
     await ctx.reply(
-      "BOOMERVERSE ARCADE \u2014 SIX GAMES\n\nPick one. Scores stay on your own device. " + (isPrivate ? "" : "Open this in a private chat with me to play inside Telegram."),
+      "BOOMERVERSE ARCADE \u2014 SEVEN GAMES\n\nPick one. Scores stay on your own device. " + (isPrivate ? "" : "Open this in a private chat with me to play inside Telegram."),
       { reply_markup: { inline_keyboard: rows } }
     );
   };
